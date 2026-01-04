@@ -243,9 +243,7 @@ When `-cpu 45gs02` is specified:
     - Saves 2 bytes, 2 cycles
     - Preserves sign bit
 
-28. **Extended NOP**
-    - Multiple NOPs → Single NOP with cycle count
-    - NOP, NOP, NOP → NOP #6
+
 
 ## CPU-Specific Optimization Summary
 
@@ -305,7 +303,7 @@ When `-cpu 45gs02` is specified:
 - **STZ stores Z register, NOT zero** (critical difference!)
 - Z register for repeated value stores (any value, not just zero)
 - Q register composite [Z:Y:X:A] for 32-bit operations
-- NEG, ASR, extended NOP instructions
+- NEG, ASR instructions
 
 **Passes Applied**:
 1. Subroutine inlining
@@ -313,7 +311,6 @@ When `-cpu 45gs02` is specified:
 3. Z register repeated value optimization
 4. Q register 32-bit operation detection
 5. NEG/ASR pattern replacement
-6. Extended NOP consolidation
 
 **Special Handling**:
 - Never converts LDA #0, STA to STZ (would store Z register!)

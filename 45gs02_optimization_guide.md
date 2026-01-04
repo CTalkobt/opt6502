@@ -8,7 +8,6 @@ This guide details the specialized optimization techniques for the 45GS02 CPU fo
 - **Z Register**: A general-purpose 8-bit register, similar to A, X, Y.
 - **Q Register**: A 32-bit composite register `[Z:Y:X:A]`. Operations on Q affect all four underlying 8-bit registers.
 - **New Instructions**: `LDZ`, `STZ`, `NEG`, `ASR`, `LDQ`, `STQ`, `ADCQ`, `SBCQ`, `CMPQ`, `ASRQ`, `RORQ`, `ROLQ`, `INC16`, `DEC16`, `PHW`, `PLW`, `BRA` (always).
-- **Extended NOP**: `NOP #cycles` allows for precise multi-cycle delays.
 
 ## 1. Z Register for Repeated Stores
 
@@ -98,27 +97,6 @@ The 45GS02 includes an `ASR` instruction, which performs an arithmetic shift rig
 ```
 **Benefit**: Saves 2 bytes and 2 cycles.
 
-## 5. Extended NOP
 
-The 45GS02 `NOP` instruction can take an operand to specify a delay in cycles, making it ideal for precise timing loops or replacing multiple `NOP` instructions.
-
-**Pattern**: Multiple consecutive `NOP` instructions.
-
-**Before:**
-```asm
-  NOP
-  NOP
-  NOP
-  NOP
-```
-
-**After:**
-```asm
-  NOP #8     ; Four NOPs (2 cycles each) replaced with NOP for 8 cycles
-; OPT: NOP removed
-; OPT: NOP removed
-; OPT: NOP removed
-```
-**Benefit**: Saves bytes by consolidating multiple `NOP`s into a single instruction with a cycle count. (Each NOP is 2 cycles; so NOP #8 replaces 4 NOP instructions).
 
 This guide covers the major 45GS02-specific optimizations within `opt6502`. Utilizing these features effectively can lead to highly performant and compact code on the MEGA65.

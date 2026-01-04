@@ -620,7 +620,8 @@ void optimize_dead_code(Program *prog) {
         // Unconditional jump followed by unreachable code
         if ((strcmp(prog->lines[i].opcode, "JMP") == 0 ||
              strcmp(prog->lines[i].opcode, "RTS") == 0 ||
-             strcmp(prog->lines[i].opcode, "RTI") == 0) &&
+             strcmp(prog->lines[i].opcode, "RTI") == 0 ||
+             (prog->is_45gs02 && strcmp(prog->lines[i].opcode, "BRA") == 0) ) &&
             !prog->lines[i+1].is_branch_target &&
             !prog->lines[i+1].is_label) {
             
@@ -655,6 +656,10 @@ void optimize_jumps(Program *prog) {
         
         // Branch to next instruction (remove)
         if ((strstr(prog->lines[i].opcode, "BEQ") || 
+             strstr(prog->lines[i].opcode, "BNE") ||
+             ( prog->is_45gs02 && 
+               strstr(prog->lines[i].opcode, "BRA") != NULL
+             ) || 
              strstr(prog->lines[i].opcode, "BNE") ||
              strstr(prog->lines[i].opcode, "BCC") ||
              strstr(prog->lines[i].opcode, "BCS")) && i + 1 < prog->count) {
@@ -1625,42 +1630,7 @@ void optimize_45gs02_instructions(Program *prog) {
         // MAP instruction allows memory banking
         // Pattern: Multiple bank switches could be optimized
         
-        // ===== Extended NOP modes =====
-        // 45GS02 NOP takes operand for variable-cycle delays
-        // Pattern: Multiple NOPs -> single NOP with cycle count
-        if (i + 2 < prog->count &&
-            strcmp(prog->lines[i].opcode, "NOP") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "NOP") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "NOP") == 0 &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-            !prog->lines[i+1].is_branch_target && !prog->lines[i+2].is_branch_target) {
-            
-            // Three NOPs (6 cycles) -> NOP with operand
-            // Count consecutive NOPs
-            int nop_count = 1;
-            for (int j = i + 1; j < prog->count && j < i + 10; j++) {
-                if (strcmp(prog->lines[j].opcode, "NOP") == 0 &&
-                    !prog->lines[j].no_optimize && !prog->lines[j].is_branch_target) {
-                    nop_count++;
-                } else {
-                    break;
-                }
-            }
-            
-            if (nop_count >= 3) {
-                // Replace with extended NOP
-                int cycles = nop_count * 2;
-                char nop_operand[16];
-                snprintf(nop_operand, 16, "#%d", cycles);
-                strcpy(prog->lines[i].operand, nop_operand);
-                
-                // Mark subsequent NOPs as dead
-                for (int j = 1; j < nop_count; j++) {
-                    prog->lines[i+j].is_dead = true;
-                }
-                prog->optimizations++;
-            }
-        }
+
     }
     
     // Note: Q register optimization requires careful register tracking
