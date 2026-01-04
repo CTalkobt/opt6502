@@ -622,4 +622,3 @@ Generated with assistance from Claude (Anthropic)
 
 - [6502 Optimization Guide](./6502_optimizations_guide.md)
 - [45GS02 Optimization Guide](./45gs02_optimization_guide.md)
-- [Local Labels Example](./local_labels_example.asm)
