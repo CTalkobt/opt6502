@@ -7,7 +7,7 @@ ClearScreen:
     LDA #$00
     STA $D020
     STA $D021
-    LDA #$00        ; Redundant
+    LDA #$00	; Redundant
     TAX
 @loop:
     STA $0400,X

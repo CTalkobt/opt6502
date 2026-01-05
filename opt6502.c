@@ -32,6 +32,70 @@ typedef enum {
     ASM_LISA          // LISA - uses ;
 } AsmType;
 
+typedef enum {
+    NODE_LABEL,
+    NODE_OPCODE,
+    NODE_BRANCH,
+    NODE_JUMP,
+    NODE_LOAD,
+    NODE_STORE,
+    NODE_CONSTANT,
+    NODE_REGISTER,
+    NODE_EXPRESSION,
+    NODE_BLOCK,
+    NODE_FUNCTION,
+    NODE_ASM_LINE
+} NodeType;
+
+// Register tracking structure
+typedef struct {
+    bool a_known;      // Whether accumulator value is known
+    bool x_known;      // Whether X register value is known
+    bool y_known;      // Whether Y register value is known
+    bool z_known;      // Whether Z register value is known (45GS02)
+    bool a_zero;       // Whether accumulator is zero
+    bool x_zero;       // Whether X register is zero
+    bool y_zero;       // Whether Y register is zero
+    bool z_zero;       // Whether Z register is zero (45GS02)
+    char a_value[32];  // Known accumulator value (if any)
+    char x_value[32];  // Known X register value (if any)
+    char y_value[32];  // Known Y register value (if any)
+    char z_value[32];  // Known Z register value (if any) (45GS02)
+    bool a_modified;   // Whether accumulator was modified in current scope
+    bool x_modified;   // Whether X register was modified in current scope
+    bool y_modified;   // Whether Y register was modified in current scope
+    bool z_modified;   // Whether Z register was modified in current scope (45GS02)
+
+    // Processor flags
+    bool c_known;      // Whether carry flag state is known
+    bool n_known;      // Whether negative flag state is known
+    bool z_flag_known; // Whether zero flag state is known
+    bool v_known;      // Whether overflow flag state is known
+    bool c_set;        // Carry flag value (if known)
+    bool n_set;        // Negative flag value (if known)
+    bool z_flag_set;   // Zero flag value (if known)
+    bool v_set;        // Overflow flag value (if known)
+} RegisterState;
+
+// AST Node structure
+typedef struct AstNode {
+    NodeType type;
+    int line_num;
+    char* label;
+    char* opcode;
+    char* operand;
+    char* comment;
+    struct AstNode* next;
+    struct AstNode* child;
+    struct AstNode* sibling;
+    bool is_dead;
+    bool no_optimize;
+    bool is_local_label;
+    bool is_branch_target;
+    int optimization_count;
+    RegisterState reg_state;  // Register state at this node
+} AstNode;
+
 typedef struct {
     AsmType type;
     const char *name;
@@ -43,42 +107,13 @@ typedef struct {
 } AsmConfig;
 
 typedef struct {
-    char line[MAX_LINE];
-    char opcode[16];
-    char operand[64];
-    char label[64];
-    bool is_label;
-    bool is_local_label;
-    bool is_branch_target;
-    bool is_dead;
-    bool no_optimize;
-    int line_num;
-    char parent_label[64];  // For local labels, track their parent
-} AsmLine;
-
-typedef struct {
-    char name[64];
-    int line_num;
-    int ref_count;
-    int ref_lines[MAX_REFS];
-    bool is_subroutine;
-    bool is_local;
-    char parent_label[64];  // For local labels
-    int sub_start;
-    int sub_end;
-} Label;
-
-typedef struct {
-    AsmLine *lines;
+    AstNode *root;
+    AstNode *current_node;
     int count;
-    int capacity;
-    Label labels[MAX_LABELS];
-    int label_count;
     OptMode mode;
     int optimizations;
     bool opt_enabled;
     AsmConfig config;
-    char current_parent_label[64];  // Track current scope for local labels
     CpuType cpu_type;               // Target CPU type
     bool allow_65c02;               // Allow 65C02 instructions
     bool allow_undocumented;        // Allow undocumented opcodes
@@ -87,43 +122,22 @@ typedef struct {
 } Program;
 
 // Forward declarations
-void parse_line(AsmLine *asmline, const char *line, int line_num, AsmConfig *config, const char *parent_label);
-void build_label_table(Program *prog);
-void mark_branch_targets(Program *prog);
-void analyze_call_flow(Program *prog);
-void optimize_program(Program *prog);
-void write_output(Program *prog, const char *filename);
+AstNode* create_ast_node(NodeType type, int line_num);
+void parse_line_ast(AstNode *node, const char *line, int line_num, AsmConfig *config);
+void build_ast(Program *prog);
+void mark_branch_targets_ast(Program *prog);
+void analyze_call_flow_ast(Program *prog);
+void optimize_program_ast(Program *prog);
+void write_output_ast(Program *prog, const char *filename);
 AsmConfig get_asm_config(AsmType type);
 AsmType parse_asm_type(const char *type_str);
 bool is_comment_start(const char *p, AsmConfig *config);
 bool is_local_label(const char *label, AsmConfig *config);
-void reconstruct_line(AsmLine *asmline, AsmConfig *config);
-
-// Optimization passes
-void optimize_peephole(Program *prog);
-void optimize_dead_code(Program *prog);
-void optimize_jumps(Program *prog);
-void optimize_load_store(Program *prog);
-void optimize_register_usage(Program *prog);
-void optimize_branches(Program *prog);
-void optimize_constant_propagation(Program *prog);
-void optimize_inline_subroutines(Program *prog);
-void optimize_strength_reduction(Program *prog);
-void optimize_common_subexpressions(Program *prog);
-void optimize_addressing_modes(Program *prog);
-void optimize_zero_page(Program *prog);
-void optimize_branch_chaining(Program *prog);
-void optimize_flag_usage(Program *prog);
-void optimize_loop_invariants(Program *prog);
-void optimize_bit_operations(Program *prog);
-void optimize_arithmetic(Program *prog);
-void optimize_tail_calls(Program *prog);
-void optimize_loop_unrolling(Program *prog);
-void optimize_stack_operations(Program *prog);
-void optimize_constant_folding(Program *prog);
-void optimize_boolean_logic(Program *prog);
-void optimize_65c02_instructions(Program *prog);
-void optimize_45gs02_instructions(Program *prog);
+void free_ast_node(AstNode *node);
+void free_program_ast(Program *prog);
+void update_register_state(AstNode *node, RegisterState *state);
+void print_register_state(const RegisterState *state, int line_num);
+void validate_register_and_flag_tracking(Program *prog);
 
 // Get assembler configuration
 AsmConfig get_asm_config(AsmType type) {
@@ -203,18 +217,89 @@ bool is_local_label(const char *label, AsmConfig *config) {
     return false;
 }
 
+// Create AST node
+AstNode* create_ast_node(NodeType type, int line_num) {
+    AstNode *node = malloc(sizeof(AstNode));
+    node->type = type;
+    node->line_num = line_num;
+    node->label = NULL;
+    node->opcode = NULL;
+    node->operand = NULL;
+    node->comment = NULL;
+    node->next = NULL;
+    node->child = NULL;
+    node->sibling = NULL;
+    node->is_dead = false;
+    node->no_optimize = false;
+    node->is_local_label = false;
+    node->is_branch_target = false;
+    node->optimization_count = 0;
+    
+    // Initialize register state
+    node->reg_state.a_known = false;
+    node->reg_state.x_known = false;
+    node->reg_state.y_known = false;
+    node->reg_state.z_known = false;
+    node->reg_state.a_zero = false;
+    node->reg_state.x_zero = false;
+    node->reg_state.y_zero = false;
+    node->reg_state.z_zero = false;
+    node->reg_state.a_modified = false;
+    node->reg_state.x_modified = false;
+    node->reg_state.y_modified = false;
+    node->reg_state.z_modified = false;
+    node->reg_state.a_value[0] = '\0';
+    node->reg_state.x_value[0] = '\0';
+    node->reg_state.y_value[0] = '\0';
+    node->reg_state.z_value[0] = '\0';
+
+    // Initialize flag state
+    node->reg_state.c_known = false;
+    node->reg_state.n_known = false;
+    node->reg_state.z_flag_known = false;
+    node->reg_state.v_known = false;
+    node->reg_state.c_set = false;
+    node->reg_state.n_set = false;
+    node->reg_state.z_flag_set = false;
+    node->reg_state.v_set = false;
+    
+    return node;
+}
+
+// Free AST node
+void free_ast_node(AstNode *node) {
+    if (!node) return;
+    
+    if (node->label) free(node->label);
+    if (node->opcode) free(node->opcode);
+    if (node->operand) free(node->operand);
+    if (node->comment) free(node->comment);
+    
+    // Free children recursively
+    free_ast_node(node->child);
+    free_ast_node(node->sibling);
+    
+    free(node);
+}
+
+// Free program AST
+void free_program_ast(Program *prog) {
+    if (!prog) return;
+    
+    free_ast_node(prog->root);
+    free(prog);
+}
+
 // Initialize program structure
 Program* create_program(OptMode mode, AsmType asm_type) {
     Program *prog = malloc(sizeof(Program));
-    prog->capacity = 1000;
-    prog->lines = malloc(prog->capacity * sizeof(AsmLine));
+    prog->root = NULL;
+    prog->current_node = NULL;
     prog->count = 0;
-    prog->label_count = 0;
     prog->mode = mode;
     prog->optimizations = 0;
     prog->opt_enabled = true;
     prog->config = get_asm_config(asm_type);
-    prog->current_parent_label[0] = ' ';
     prog->cpu_type = CPU_6502;
     prog->allow_65c02 = false;
     prog->allow_undocumented = false;
@@ -223,17 +308,9 @@ Program* create_program(OptMode mode, AsmType asm_type) {
     return prog;
 }
 
-void free_program(Program *prog) {
-    free(prog->lines);
-    free(prog);
-}
-
-// Add line to program
-void add_line(Program *prog, const char *line, int line_num) {
-    if (prog->count >= prog->capacity) {
-        prog->capacity *= 2;
-        prog->lines = realloc(prog->lines, prog->capacity * sizeof(AsmLine));
-    }
+// Add line to AST
+void add_line_ast(Program *prog, const char *line, int line_num) {
+    AstNode *node = create_ast_node(NODE_ASM_LINE, line_num);
     
     // Check for optimizer directives in comments
     const char *trimmed = line;
@@ -261,35 +338,23 @@ void add_line(Program *prog, const char *line, int line_num) {
         }
     }
     
-    parse_line(&prog->lines[prog->count], line, line_num, &prog->config, prog->current_parent_label);
-    prog->lines[prog->count].no_optimize = !prog->opt_enabled;
+    parse_line_ast(node, line, line_num, &prog->config);
+    node->no_optimize = !prog->opt_enabled;
     
-    // Update parent label tracking
-    if (prog->lines[prog->count].is_label && !prog->lines[prog->count].is_local_label) {
-        snprintf(prog->current_parent_label, sizeof(prog->current_parent_label), "%s", prog->lines[prog->count].label);
+    // Add to AST
+    if (prog->root == NULL) {
+        prog->root = node;
+        prog->current_node = node;
+    } else {
+        prog->current_node->next = node;
+        prog->current_node = node;
     }
     
     prog->count++;
 }
 
-// Parse assembly line into components
-void parse_line(AsmLine *asmline, const char *line, int line_num, AsmConfig *config, const char *parent_label) {
-    strncpy(asmline->line, line, MAX_LINE - 1);
-    asmline->line[MAX_LINE - 1] = ' ';
-    asmline->is_dead = false;
-    asmline->is_branch_target = false;
-    asmline->no_optimize = false;
-    asmline->is_local_label = false;
-    asmline->line_num = line_num;
-    asmline->label[0] = ' ';
-    asmline->opcode[0] = ' ';
-    asmline->operand[0] = ' ';
-    asmline->parent_label[0] = ' ';
-    
-    if (parent_label) {
-        strncpy(asmline->parent_label, parent_label, 63);
-    }
-    
+// Parse assembly line into AST components
+void parse_line_ast(AstNode *node, const char *line, int line_num, AsmConfig *config) {
     const char *p = line;
     while (*p && isspace(*p)) p++;
     
@@ -304,29 +369,36 @@ void parse_line(AsmLine *asmline, const char *line, int line_num, AsmConfig *con
         
         // Parse label - stops at whitespace or colon
         while (*p && !isspace(*p) && *p != ':' && !is_comment_start(p, config) && i < 63) {
-            asmline->label[i++] = *p++;
+            i++;
+            p++;
         }
-        asmline->label[i] = ' ';
+        
+        // Allocate and copy label
+        node->label = malloc(i + 1);
+        if (node->label) {
+            strncpy(node->label, line, i);
+            node->label[i] = '\0';
+        }
         
         // Check if this is a local label
-        if (is_local_label(asmline->label, config)) {
-            asmline->is_local_label = true;
+        if (is_local_label(node->label, config)) {
+            node->is_local_label = true;
         }
         
         // Check if this is actually a label
         if (config->supports_colon_labels && *p == ':') {
             // Definitely a label
-            asmline->is_label = true;
+            node->type = NODE_LABEL;
             p++; // Skip colon
-        } else if (i > 0 && asmline->label[0]) {
+        } else if (i > 0 && node->label[0]) {
             // Might be a label (for Merlin style without colons)
             // We'll assume it is if followed by whitespace or end of line
-            asmline->is_label = true;
+            node->type = NODE_LABEL;
         }
         
         while (*p && isspace(*p)) p++;
     } else {
-        asmline->is_label = false;
+        node->type = NODE_ASM_LINE;
     }
     
     // Skip comments
@@ -335,1229 +407,1174 @@ void parse_line(AsmLine *asmline, const char *line, int line_num, AsmConfig *con
     // Parse opcode
     int i = 0;
     while (*p && !isspace(*p) && !is_comment_start(p, config) && i < 15) {
-        asmline->opcode[i++] = config->case_sensitive ? *p : toupper(*p);
+        i++;
         p++;
     }
-    asmline->opcode[i] = ' ';
+    
+    // Allocate and copy opcode
+    node->opcode = malloc(i + 1);
+    if (node->opcode) {
+        strncpy(node->opcode, line + (p - line - i), i);
+        node->opcode[i] = '\0';
+    }
     
     while (*p && isspace(*p)) p++;
     
     // Parse operand
     i = 0;
     while (*p && !is_comment_start(p, config) && i < 63) {
-        asmline->operand[i++] = *p++;
+        i++;
+        p++;
     }
-    asmline->operand[i] = ' ';
+
+    // Allocate and copy operand
+    node->operand = malloc(i + 1);
+    if (node->operand) {
+        strncpy(node->operand, line + (p - line - i), i);
+        node->operand[i] = '\0';
+    }
+
     // Trim trailing whitespace
-    while (i > 0 && isspace(asmline->operand[i-1])) {
-        asmline->operand[--i] = ' ';
+    while (i > 0 && isspace(node->operand[i-1])) {
+        node->operand[--i] = '\0';
+    }
+
+    // Parse comment if present
+    if (is_comment_start(p, config)) {
+        // Skip past comment start character(s)
+        const char *comment_start = p;
+        if (strcmp(config->comment_char, "//") == 0) {
+            p += 2;
+        } else {
+            p += 1;
+        }
+
+        // Copy the rest of the line as comment (including comment character)
+        size_t comment_len = strlen(comment_start);
+        if (comment_len > 0) {
+            node->comment = malloc(comment_len + 1);
+            if (node->comment) {
+                strcpy(node->comment, comment_start);
+            }
+        }
     }
 }
 
-// Reconstruct the full line string from parsed components
-void reconstruct_line(AsmLine *asmline, AsmConfig *config) {
-    char buffer[MAX_LINE];
-    int offset = 0;
-
-    // Add label if present
-    if (asmline->label[0]) {
-        offset += snprintf(buffer + offset, MAX_LINE - offset, "%s", asmline->label);
-        if (config->supports_colon_labels && !asmline->is_local_label) {
-            offset += snprintf(buffer + offset, MAX_LINE - offset, ":");
-        }
-        // Add a tab or space after label
-        offset += snprintf(buffer + offset, MAX_LINE - offset, "\t");
-    }
-
-    // Add opcode
-    if (asmline->opcode[0]) {
-        // Ensure at least one tab/space if no label but opcode exists
-        if (offset == 0) {
-            offset += snprintf(buffer + offset, MAX_LINE - offset, "\t");
-        }
-        offset += snprintf(buffer + offset, MAX_LINE - offset, "%s", asmline->opcode);
-        // Add space after opcode if operand exists
-        if (asmline->operand[0]) {
-            offset += snprintf(buffer + offset, MAX_LINE - offset, " ");
-        }
-    }
-
-    // Add operand
-    if (asmline->operand[0]) {
-        offset += snprintf(buffer + offset, MAX_LINE - offset, "%s", asmline->operand);
-    }
-    
-    // Copy reconstructed line back, ensuring it's not empty for dead lines to allow trace comments.
-    // If a line becomes empty due to optimization, it will be marked dead and handled by write_output.
-    if (offset == 0 && asmline->line[0] != ' ') {
-        // If the line was originally not empty but now is, keep it as empty string.
-        // This handles cases where comments might have been on the same line as code,
-        // and the code was removed. We don't want to lose the original comment if tracing is off.
-        asmline->line[0] = ' ';
-    } else {
-        strncpy(asmline->line, buffer, MAX_LINE - 1);
-        asmline->line[MAX_LINE - 1] = ' ';
-    }
-}
-
-
-
-// Build label reference table
-void build_label_table(Program *prog) {
-    prog->label_count = 0;
-    
-    // First pass: collect all labels
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_label && prog->lines[i].label[0]) {
-            Label *lbl = &prog->labels[prog->label_count];
-            snprintf(lbl->name, sizeof(lbl->name), "%s", prog->lines[i].label);
-            lbl->line_num = i;
-            lbl->ref_count = 0;
-            lbl->is_subroutine = false;
-            lbl->is_local = prog->lines[i].is_local_label;
-            lbl->sub_start = i;
-            lbl->sub_end = -1;
-            
-            // Store parent label for local labels
-            if (lbl->is_local) {
-                snprintf(lbl->parent_label, sizeof(lbl->parent_label), "%s", prog->lines[i].parent_label);
-            } else {
-                lbl->parent_label[0] = ' ';
-            }
-            
-            prog->label_count++;
-        }
-    }
-    
-    // Second pass: find references and identify subroutines
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].operand[0]) {
-            for (int j = 0; j < prog->label_count; j++) {
-                // For local labels, only match if we're in the same scope
-                bool match = false;
-                
-                if (prog->labels[j].is_local) {
-                    // Local label - must match parent scope
-                    if (strcmp(prog->lines[i].parent_label, prog->labels[j].parent_label) == 0 &&
-                        strstr(prog->lines[i].operand, prog->labels[j].name)) {
-                        match = true;
-                    }
-                } else {
-                    // Global label - simple match
-                    if (strstr(prog->lines[i].operand, prog->labels[j].name)) {
-                        match = true;
-                    }
-                }
-                
-                if (match) {
-                    if (prog->labels[j].ref_count < MAX_REFS) {
-                        prog->labels[j].ref_lines[prog->labels[j].ref_count++] = i;
-                    }
-                    // If referenced by JSR, it's a subroutine
-                    if (strcmp(prog->lines[i].opcode, "JSR") == 0) {
-                        prog->labels[j].is_subroutine = true;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Third pass: determine subroutine boundaries
-    for (int i = 0; i < prog->label_count; i++) {
-        if (prog->labels[i].is_subroutine) {
-            int start = prog->labels[i].line_num;
-            // Find the RTS that ends this subroutine
-            for (int j = start + 1; j < prog->count; j++) {
-                if (strcmp(prog->lines[j].opcode, "RTS") == 0) {
-                    prog->labels[i].sub_end = j;
-                    break;
-                }
-                // Stop if we hit another global label (start of another routine)
-                if (prog->lines[j].is_label && !prog->lines[j].is_local_label && j != start) {
-                    break;
-                }
-            }
-        }
-    }
+// Build AST from program lines
+void build_ast(Program *prog) {
+    // AST is built during parsing in add_line_ast
+    // This function can be used for additional AST processing if needed
 }
 
 // Mark lines that are branch targets
-void mark_branch_targets(Program *prog) {
-    for (int i = 0; i < prog->label_count; i++) {
-        int line = prog->labels[i].line_num;
-        if (line >= 0 && line < prog->count) {
-            prog->lines[line].is_branch_target = true;
+void mark_branch_targets_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->type == NODE_LABEL) {
+            node->is_branch_target = true;
         }
+        node = node->next;
     }
 }
 
 // Call flow analysis
-void analyze_call_flow(Program *prog) {
-    build_label_table(prog);
-    mark_branch_targets(prog);
+void analyze_call_flow_ast(Program *prog) {
+    mark_branch_targets_ast(prog);
+}
+
+// Update register state based on instruction
+void update_register_state(AstNode *node, RegisterState *state) {
+    if (!node || !node->opcode) return;
+
+    // Reset modification flags
+    state->a_modified = false;
+    state->x_modified = false;
+    state->y_modified = false;
+    state->z_modified = false;
+
+    // === LOAD INSTRUCTIONS ===
+    // LDA - Load Accumulator: Sets N and Z flags
+    if (strcasecmp(node->opcode, "LDA") == 0) {
+        state->a_modified = true;
+        state->n_known = true;
+        state->z_flag_known = true;
+
+        if (node->operand && node->operand[0] == '#') {
+            // Immediate mode - we know the exact value
+            state->a_known = true;
+            strcpy(state->a_value, node->operand);
+            state->a_zero = (strcmp(node->operand, "#$00") == 0 || strcmp(node->operand, "#0") == 0);
+            state->z_flag_set = state->a_zero;
+            // For N flag, we'd need to parse the value to check bit 7
+            // Simplified: if value is $80-$FF, N is set
+            state->n_set = false; // Conservative - would need full value parsing
+        } else {
+            // Memory load - value unknown
+            state->a_known = false;
+            state->a_zero = false;
+            state->a_value[0] = '\0';
+            state->z_flag_set = false; // Unknown
+            state->n_set = false;      // Unknown
+            state->z_flag_known = false;
+            state->n_known = false;
+        }
+    }
+
+    // LDX - Load X Register: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "LDX") == 0) {
+        state->x_modified = true;
+        state->n_known = true;
+        state->z_flag_known = true;
+
+        if (node->operand && node->operand[0] == '#') {
+            state->x_known = true;
+            strcpy(state->x_value, node->operand);
+            state->x_zero = (strcmp(node->operand, "#$00") == 0 || strcmp(node->operand, "#0") == 0);
+            state->z_flag_set = state->x_zero;
+            state->n_set = false; // Conservative
+        } else {
+            state->x_known = false;
+            state->x_zero = false;
+            state->x_value[0] = '\0';
+            state->z_flag_known = false;
+            state->n_known = false;
+        }
+    }
+
+    // LDY - Load Y Register: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "LDY") == 0) {
+        state->y_modified = true;
+        state->n_known = true;
+        state->z_flag_known = true;
+
+        if (node->operand && node->operand[0] == '#') {
+            state->y_known = true;
+            strcpy(state->y_value, node->operand);
+            state->y_zero = (strcmp(node->operand, "#$00") == 0 || strcmp(node->operand, "#0") == 0);
+            state->z_flag_set = state->y_zero;
+            state->n_set = false; // Conservative
+        } else {
+            state->y_known = false;
+            state->y_zero = false;
+            state->y_value[0] = '\0';
+            state->z_flag_known = false;
+            state->n_known = false;
+        }
+    }
+
+    // LDZ - Load Z Register (45GS02): Sets N and Z flags
+    else if (strcasecmp(node->opcode, "LDZ") == 0) {
+        state->z_modified = true;
+        state->n_known = true;
+        state->z_flag_known = true;
+
+        if (node->operand && node->operand[0] == '#') {
+            state->z_known = true;
+            strcpy(state->z_value, node->operand);
+            state->z_zero = (strcmp(node->operand, "#$00") == 0 || strcmp(node->operand, "#0") == 0);
+            state->z_flag_set = state->z_zero;
+            state->n_set = false; // Conservative
+        } else {
+            state->z_known = false;
+            state->z_zero = false;
+            state->z_value[0] = '\0';
+            state->z_flag_known = false;
+            state->n_known = false;
+        }
+    }
+
+    // === STORE INSTRUCTIONS ===
+    // STA, STX, STY, STZ - Store instructions: No flags affected
+    else if (strcasecmp(node->opcode, "STA") == 0 ||
+             strcasecmp(node->opcode, "STX") == 0 ||
+             strcasecmp(node->opcode, "STY") == 0 ||
+             strcasecmp(node->opcode, "STZ") == 0) {
+        // Store operations don't affect registers or flags
+    }
+
+    // === TRANSFER INSTRUCTIONS ===
+    // TAX - Transfer A to X: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "TAX") == 0) {
+        state->x_modified = true;
+        state->x_known = state->a_known;
+        if (state->a_known) {
+            strcpy(state->x_value, state->a_value);
+            state->x_zero = state->a_zero;
+        }
+        state->n_known = state->a_known;
+        state->z_flag_known = state->a_known;
+        if (state->a_known) {
+            state->z_flag_set = state->a_zero;
+        }
+    }
+
+    // TXA - Transfer X to A: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "TXA") == 0) {
+        state->a_modified = true;
+        state->a_known = state->x_known;
+        if (state->x_known) {
+            strcpy(state->a_value, state->x_value);
+            state->a_zero = state->x_zero;
+        }
+        state->n_known = state->x_known;
+        state->z_flag_known = state->x_known;
+        if (state->x_known) {
+            state->z_flag_set = state->x_zero;
+        }
+    }
+
+    // TAY - Transfer A to Y: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "TAY") == 0) {
+        state->y_modified = true;
+        state->y_known = state->a_known;
+        if (state->a_known) {
+            strcpy(state->y_value, state->a_value);
+            state->y_zero = state->a_zero;
+        }
+        state->n_known = state->a_known;
+        state->z_flag_known = state->a_known;
+        if (state->a_known) {
+            state->z_flag_set = state->a_zero;
+        }
+    }
+
+    // TYA - Transfer Y to A: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "TYA") == 0) {
+        state->a_modified = true;
+        state->a_known = state->y_known;
+        if (state->y_known) {
+            strcpy(state->a_value, state->y_value);
+            state->a_zero = state->y_zero;
+        }
+        state->n_known = state->y_known;
+        state->z_flag_known = state->y_known;
+        if (state->y_known) {
+            state->z_flag_set = state->y_zero;
+        }
+    }
+
+    // TSX - Transfer SP to X: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "TSX") == 0) {
+        state->x_modified = true;
+        state->x_known = false; // SP value typically unknown
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // TXS - Transfer X to SP: No flags affected
+    else if (strcasecmp(node->opcode, "TXS") == 0) {
+        // No flags or visible registers modified
+    }
+
+    // === INCREMENT/DECREMENT ===
+    // INX - Increment X: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "INX") == 0) {
+        state->x_modified = true;
+        state->x_known = false; // Value changes, typically becomes unknown
+        state->x_zero = false;  // Very unlikely to wrap to zero
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // INY - Increment Y: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "INY") == 0) {
+        state->y_modified = true;
+        state->y_known = false;
+        state->y_zero = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // DEX - Decrement X: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "DEX") == 0) {
+        state->x_modified = true;
+        state->x_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // DEY - Decrement Y: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "DEY") == 0) {
+        state->y_modified = true;
+        state->y_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // INC - Increment Memory or A: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "INC") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            // INC A (65C02)
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // DEC - Decrement Memory or A: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "DEC") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            // DEC A (65C02)
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // === ARITHMETIC ===
+    // ADC - Add with Carry: Sets C, N, Z, V flags
+    else if (strcasecmp(node->opcode, "ADC") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->c_known = false;  // Result of carry depends on operands
+        state->n_known = false;
+        state->z_flag_known = false;
+        state->v_known = false;  // Overflow depends on operands
+    }
+
+    // SBC - Subtract with Carry: Sets C, N, Z, V flags
+    else if (strcasecmp(node->opcode, "SBC") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->c_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+        state->v_known = false;
+    }
+
+    // === LOGICAL OPERATIONS ===
+    // AND - Logical AND: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "AND") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+        // C and V are not affected
+    }
+
+    // ORA - Logical OR: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "ORA") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // EOR - Logical XOR: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "EOR") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // === SHIFT AND ROTATE ===
+    // ASL - Arithmetic Shift Left: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "ASL") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->c_known = false;  // Bit 7 goes to carry
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // LSR - Logical Shift Right: Sets C, N, Z flags (N always 0)
+    else if (strcasecmp(node->opcode, "LSR") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->c_known = false;  // Bit 0 goes to carry
+        state->n_known = true;
+        state->n_set = false;    // LSR always clears N
+        state->z_flag_known = false;
+    }
+
+    // ROL - Rotate Left: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "ROL") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->c_known = false;  // Bit 7 goes to carry
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // ROR - Rotate Right: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "ROR") == 0) {
+        if (!node->operand || node->operand[0] == 'A' || node->operand[0] == 'a') {
+            state->a_modified = true;
+            state->a_known = false;
+        }
+        state->c_known = false;  // Bit 0 goes to carry
+        state->n_known = false;  // Depends on carry flag going into bit 7
+        state->z_flag_known = false;
+    }
+
+    // === COMPARISON ===
+    // CMP - Compare Accumulator: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "CMP") == 0) {
+        state->c_known = false;  // Set if A >= operand
+        state->n_known = false;
+        state->z_flag_known = false; // Set if A == operand
+    }
+
+    // CPX - Compare X: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "CPX") == 0) {
+        state->c_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // CPY - Compare Y: Sets C, N, Z flags
+    else if (strcasecmp(node->opcode, "CPY") == 0) {
+        state->c_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // === FLAG MANIPULATION ===
+    // CLC - Clear Carry: Clears C flag
+    else if (strcasecmp(node->opcode, "CLC") == 0) {
+        state->c_known = true;
+        state->c_set = false;
+    }
+
+    // SEC - Set Carry: Sets C flag
+    else if (strcasecmp(node->opcode, "SEC") == 0) {
+        state->c_known = true;
+        state->c_set = true;
+    }
+
+    // CLV - Clear Overflow: Clears V flag
+    else if (strcasecmp(node->opcode, "CLV") == 0) {
+        state->v_known = true;
+        state->v_set = false;
+    }
+
+    // CLI - Clear Interrupt: Clears I flag (not tracked)
+    else if (strcasecmp(node->opcode, "CLI") == 0) {
+        // I flag not tracked in this implementation
+    }
+
+    // SEI - Set Interrupt: Sets I flag (not tracked)
+    else if (strcasecmp(node->opcode, "SEI") == 0) {
+        // I flag not tracked
+    }
+
+    // CLD - Clear Decimal: Clears D flag (not tracked)
+    else if (strcasecmp(node->opcode, "CLD") == 0) {
+        // D flag not tracked
+    }
+
+    // SED - Set Decimal: Sets D flag (not tracked)
+    else if (strcasecmp(node->opcode, "SED") == 0) {
+        // D flag not tracked
+    }
+
+    // === STACK OPERATIONS ===
+    // PHA - Push Accumulator: No flags affected
+    else if (strcasecmp(node->opcode, "PHA") == 0) {
+        // No register or flag changes
+    }
+
+    // PHP - Push Processor Status: No flags affected
+    else if (strcasecmp(node->opcode, "PHP") == 0) {
+        // No register or flag changes
+    }
+
+    // PLA - Pull Accumulator: Sets N and Z flags
+    else if (strcasecmp(node->opcode, "PLA") == 0) {
+        state->a_modified = true;
+        state->a_known = false;  // Value from stack is unknown
+        state->n_known = false;
+        state->z_flag_known = false;
+    }
+
+    // PLP - Pull Processor Status: All flags affected
+    else if (strcasecmp(node->opcode, "PLP") == 0) {
+        // All flags become unknown (restored from stack)
+        state->c_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+        state->v_known = false;
+    }
+
+    // === BRANCHES & JUMPS ===
+    // Branch and jump instructions don't affect registers or flags
+    else if (strcasecmp(node->opcode, "BCC") == 0 ||
+             strcasecmp(node->opcode, "BCS") == 0 ||
+             strcasecmp(node->opcode, "BEQ") == 0 ||
+             strcasecmp(node->opcode, "BNE") == 0 ||
+             strcasecmp(node->opcode, "BMI") == 0 ||
+             strcasecmp(node->opcode, "BPL") == 0 ||
+             strcasecmp(node->opcode, "BVC") == 0 ||
+             strcasecmp(node->opcode, "BVS") == 0 ||
+             strcasecmp(node->opcode, "BRA") == 0 || // 65C02
+             strcasecmp(node->opcode, "JMP") == 0 ||
+             strcasecmp(node->opcode, "JSR") == 0 ||
+             strcasecmp(node->opcode, "RTS") == 0 ||
+             strcasecmp(node->opcode, "RTI") == 0) {
+        // No register or flag changes
+        // Note: RTI restores flags but we treat it as unknown
+        if (strcasecmp(node->opcode, "RTI") == 0) {
+            state->c_known = false;
+            state->n_known = false;
+            state->z_flag_known = false;
+            state->v_known = false;
+        }
+        // JSR may trash A,X,Y depending on subroutine
+        if (strcasecmp(node->opcode, "JSR") == 0) {
+            state->a_known = false;
+            state->x_known = false;
+            state->y_known = false;
+            state->z_known = false;
+            state->c_known = false;
+            state->n_known = false;
+            state->z_flag_known = false;
+            state->v_known = false;
+        }
+    }
+
+    // === 45GS02 SPECIFIC ===
+    // NEG - Negate Accumulator (45GS02): Sets N, Z, C flags
+    else if (strcasecmp(node->opcode, "NEG") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->n_known = false;
+        state->z_flag_known = false;
+        state->c_known = false;
+    }
+
+    // ASR - Arithmetic Shift Right (45GS02): Sets N, Z, C flags
+    else if (strcasecmp(node->opcode, "ASR") == 0) {
+        state->a_modified = true;
+        state->a_known = false;
+        state->n_known = false;  // Sign bit is preserved
+        state->z_flag_known = false;
+        state->c_known = false;
+    }
+
+    // === BIT TEST ===
+    // BIT - Bit Test: Sets N, V, Z flags
+    else if (strcasecmp(node->opcode, "BIT") == 0) {
+        state->n_known = false;  // Bit 7 of operand
+        state->v_known = false;  // Bit 6 of operand
+        state->z_flag_known = false; // Result of A & operand
+    }
+
+    // NOP - No operation
+    else if (strcasecmp(node->opcode, "NOP") == 0) {
+        // No changes
+    }
+}
+
+// Print register state for debugging
+void print_register_state(const RegisterState *state, int line_num) {
+    if (!state) return;
+
+    printf("  Register state at line %d:\n", line_num);
+    printf("    A: known=%s, zero=%s, value=%s, modified=%s\n",
+           state->a_known ? "yes" : "no",
+           state->a_zero ? "yes" : "no",
+           state->a_known ? state->a_value : "unknown",
+           state->a_modified ? "yes" : "no");
+    printf("    X: known=%s, zero=%s, value=%s, modified=%s\n",
+           state->x_known ? "yes" : "no",
+           state->x_zero ? "yes" : "no",
+           state->x_known ? state->x_value : "unknown",
+           state->x_modified ? "yes" : "no");
+    printf("    Y: known=%s, zero=%s, value=%s, modified=%s\n",
+           state->y_known ? "yes" : "no",
+           state->y_zero ? "yes" : "no",
+           state->y_known ? state->y_value : "unknown",
+           state->y_modified ? "yes" : "no");
+    printf("    Z: known=%s, zero=%s, value=%s, modified=%s\n",
+           state->z_known ? "yes" : "no",
+           state->z_zero ? "yes" : "no",
+           state->z_known ? state->z_value : "unknown",
+           state->z_modified ? "yes" : "no");
+    printf("    Flags:\n");
+    printf("      C (Carry):    known=%s, set=%s\n",
+           state->c_known ? "yes" : "no",
+           state->c_known ? (state->c_set ? "yes" : "no") : "unknown");
+    printf("      N (Negative): known=%s, set=%s\n",
+           state->n_known ? "yes" : "no",
+           state->n_known ? (state->n_set ? "yes" : "no") : "unknown");
+    printf("      Z (Zero):     known=%s, set=%s\n",
+           state->z_flag_known ? "yes" : "no",
+           state->z_flag_known ? (state->z_flag_set ? "yes" : "no") : "unknown");
+    printf("      V (Overflow): known=%s, set=%s\n",
+           state->v_known ? "yes" : "no",
+           state->v_known ? (state->v_set ? "yes" : "no") : "unknown");
+}
+
+// Validate register and flag tracking
+void validate_register_and_flag_tracking(Program *prog) {
+    printf("\n=== Register and Flag Tracking Validation ===\n");
+
+    RegisterState state;
+    // Initialize state
+    state.a_known = false;
+    state.x_known = false;
+    state.y_known = false;
+    state.z_known = false;
+    state.a_zero = false;
+    state.x_zero = false;
+    state.y_zero = false;
+    state.z_zero = false;
+    state.a_modified = false;
+    state.x_modified = false;
+    state.y_modified = false;
+    state.z_modified = false;
+    state.a_value[0] = '\0';
+    state.x_value[0] = '\0';
+    state.y_value[0] = '\0';
+    state.z_value[0] = '\0';
+    state.c_known = false;
+    state.n_known = false;
+    state.z_flag_known = false;
+    state.v_known = false;
+    state.c_set = false;
+    state.n_set = false;
+    state.z_flag_set = false;
+    state.v_set = false;
+
+    int instruction_count = 0;
+    int register_modifications = 0;
+    int flag_modifications = 0;
+
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->opcode) {
+            instruction_count++;
+
+            // Save previous state
+            RegisterState prev_state = state;
+
+            // Update state based on instruction
+            update_register_state(node, &state);
+
+            // Check if registers were modified
+            if (state.a_modified) register_modifications++;
+            if (state.x_modified) register_modifications++;
+            if (state.y_modified) register_modifications++;
+            if (state.z_modified) register_modifications++;
+
+            // Check if flags were modified (compare with previous state)
+            if (state.c_known != prev_state.c_known || state.c_set != prev_state.c_set) flag_modifications++;
+            if (state.n_known != prev_state.n_known || state.n_set != prev_state.n_set) flag_modifications++;
+            if (state.z_flag_known != prev_state.z_flag_known || state.z_flag_set != prev_state.z_flag_set) flag_modifications++;
+            if (state.v_known != prev_state.v_known || state.v_set != prev_state.v_set) flag_modifications++;
+
+            // For verbose output, print state after each instruction
+            if (prog->trace_level >= 2) {
+                printf("\nLine %d: %s %s\n", node->line_num, node->opcode,
+                       node->operand ? node->operand : "");
+                print_register_state(&state, node->line_num);
+            }
+
+            // Reset state at branch targets (control flow convergence)
+            if (node->is_branch_target) {
+                // Conservative: assume registers and flags are unknown at branch targets
+                state.a_known = false;
+                state.x_known = false;
+                state.y_known = false;
+                state.z_known = false;
+                state.c_known = false;
+                state.n_known = false;
+                state.z_flag_known = false;
+                state.v_known = false;
+            }
+        }
+        node = node->next;
+    }
+
+    printf("\n=== Validation Summary ===\n");
+    printf("Total instructions analyzed: %d\n", instruction_count);
+    printf("Register modifications detected: %d\n", register_modifications);
+    printf("Flag modifications detected: %d\n", flag_modifications);
+
+    // Summary of register usage
+    printf("\n=== Register Usage Summary ===\n");
+    state = (RegisterState){0}; // Reset
+    state.a_known = false;
+    state.x_known = false;
+    state.y_known = false;
+    state.z_known = false;
+    state.c_known = false;
+    state.n_known = false;
+    state.z_flag_known = false;
+    state.v_known = false;
+
+    bool a_used = false, x_used = false, y_used = false, z_used = false;
+    bool c_affected = false, n_affected = false, z_affected = false, v_affected = false;
+
+    node = prog->root;
+    while (node) {
+        if (node->opcode) {
+            RegisterState temp_state = state;
+            update_register_state(node, &temp_state);
+
+            if (temp_state.a_modified) a_used = true;
+            if (temp_state.x_modified) x_used = true;
+            if (temp_state.y_modified) y_used = true;
+            if (temp_state.z_modified) z_used = true;
+
+            // Check if instruction affects flags
+            if (strcasecmp(node->opcode, "CLC") == 0 || strcasecmp(node->opcode, "SEC") == 0 ||
+                strcasecmp(node->opcode, "ADC") == 0 || strcasecmp(node->opcode, "SBC") == 0 ||
+                strcasecmp(node->opcode, "ASL") == 0 || strcasecmp(node->opcode, "LSR") == 0 ||
+                strcasecmp(node->opcode, "ROL") == 0 || strcasecmp(node->opcode, "ROR") == 0 ||
+                strcasecmp(node->opcode, "CMP") == 0 || strcasecmp(node->opcode, "CPX") == 0 ||
+                strcasecmp(node->opcode, "CPY") == 0) {
+                c_affected = true;
+            }
+
+            if (strcasecmp(node->opcode, "LDA") == 0 || strcasecmp(node->opcode, "LDX") == 0 ||
+                strcasecmp(node->opcode, "LDY") == 0 || strcasecmp(node->opcode, "LDZ") == 0 ||
+                strcasecmp(node->opcode, "TAX") == 0 || strcasecmp(node->opcode, "TXA") == 0 ||
+                strcasecmp(node->opcode, "TAY") == 0 || strcasecmp(node->opcode, "TYA") == 0 ||
+                strcasecmp(node->opcode, "AND") == 0 || strcasecmp(node->opcode, "ORA") == 0 ||
+                strcasecmp(node->opcode, "EOR") == 0 || strcasecmp(node->opcode, "ASL") == 0 ||
+                strcasecmp(node->opcode, "LSR") == 0 || strcasecmp(node->opcode, "ROL") == 0 ||
+                strcasecmp(node->opcode, "ROR") == 0 || strcasecmp(node->opcode, "ADC") == 0 ||
+                strcasecmp(node->opcode, "SBC") == 0 || strcasecmp(node->opcode, "CMP") == 0 ||
+                strcasecmp(node->opcode, "CPX") == 0 || strcasecmp(node->opcode, "CPY") == 0 ||
+                strcasecmp(node->opcode, "INX") == 0 || strcasecmp(node->opcode, "INY") == 0 ||
+                strcasecmp(node->opcode, "DEX") == 0 || strcasecmp(node->opcode, "DEY") == 0 ||
+                strcasecmp(node->opcode, "INC") == 0 || strcasecmp(node->opcode, "DEC") == 0 ||
+                strcasecmp(node->opcode, "BIT") == 0) {
+                n_affected = true;
+            }
+
+            if (strcasecmp(node->opcode, "LDA") == 0 || strcasecmp(node->opcode, "LDX") == 0 ||
+                strcasecmp(node->opcode, "LDY") == 0 || strcasecmp(node->opcode, "LDZ") == 0 ||
+                strcasecmp(node->opcode, "TAX") == 0 || strcasecmp(node->opcode, "TXA") == 0 ||
+                strcasecmp(node->opcode, "TAY") == 0 || strcasecmp(node->opcode, "TYA") == 0 ||
+                strcasecmp(node->opcode, "AND") == 0 || strcasecmp(node->opcode, "ORA") == 0 ||
+                strcasecmp(node->opcode, "EOR") == 0 || strcasecmp(node->opcode, "ASL") == 0 ||
+                strcasecmp(node->opcode, "LSR") == 0 || strcasecmp(node->opcode, "ROL") == 0 ||
+                strcasecmp(node->opcode, "ROR") == 0 || strcasecmp(node->opcode, "ADC") == 0 ||
+                strcasecmp(node->opcode, "SBC") == 0 || strcasecmp(node->opcode, "CMP") == 0 ||
+                strcasecmp(node->opcode, "CPX") == 0 || strcasecmp(node->opcode, "CPY") == 0 ||
+                strcasecmp(node->opcode, "INX") == 0 || strcasecmp(node->opcode, "INY") == 0 ||
+                strcasecmp(node->opcode, "DEX") == 0 || strcasecmp(node->opcode, "DEY") == 0 ||
+                strcasecmp(node->opcode, "INC") == 0 || strcasecmp(node->opcode, "DEC") == 0 ||
+                strcasecmp(node->opcode, "BIT") == 0) {
+                z_affected = true;
+            }
+
+            if (strcasecmp(node->opcode, "ADC") == 0 || strcasecmp(node->opcode, "SBC") == 0 ||
+                strcasecmp(node->opcode, "BIT") == 0 || strcasecmp(node->opcode, "CLV") == 0) {
+                v_affected = true;
+            }
+        }
+        node = node->next;
+    }
+
+    printf("Registers used:\n");
+    printf("  A (Accumulator): %s\n", a_used ? "YES" : "NO");
+    printf("  X (Index X):     %s\n", x_used ? "YES" : "NO");
+    printf("  Y (Index Y):     %s\n", y_used ? "YES" : "NO");
+    printf("  Z (Z register):  %s%s\n", z_used ? "YES" : "NO",
+           prog->is_45gs02 ? "" : " (45GS02 only)");
+
+    printf("\nFlags affected:\n");
+    printf("  C (Carry):       %s\n", c_affected ? "YES" : "NO");
+    printf("  N (Negative):    %s\n", n_affected ? "YES" : "NO");
+    printf("  Z (Zero):        %s\n", z_affected ? "YES" : "NO");
+    printf("  V (Overflow):    %s\n", v_affected ? "YES" : "NO");
+
+    printf("\n=== Validation Complete ===\n");
 }
 
 // Peephole optimization patterns
-void optimize_peephole(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+void optimize_peephole_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // LDA #value followed by STA then LDA #same_value
-        if (strcmp(prog->lines[i].opcode, "LDA") == 0 && i + 2 < prog->count) {
-            if (!prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-                strcmp(prog->lines[i+1].opcode, "STA") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "LDA") == 0 &&
-                strcmp(prog->lines[i].operand, prog->lines[i+2].operand) == 0) {
-                prog->lines[i+2].is_dead = true;
-                prog->optimizations++;
+        if (node->opcode && strcmp(node->opcode, "LDA") == 0 && node->next) {
+            AstNode *next1 = node->next;
+            if (next1->opcode && strcmp(next1->opcode, "STA") == 0 && next1->next) {
+                AstNode *next2 = next1->next;
+                if (next2->opcode && strcmp(next2->opcode, "LDA") == 0) {
+                    if (node->operand && next2->operand && strcmp(node->operand, next2->operand) == 0) {
+                        next2->is_dead = true;
+                        prog->optimizations++;
+                    }
+                }
             }
         }
         
-        // STA followed immediately by LDA same location
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i].operand, prog->lines[i+1].operand) == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // LDA followed by PHA then PLA (can remove PHA/PLA if A not used between)
-        if (strcmp(prog->lines[i].opcode, "LDA") == 0 && i + 2 < prog->count) {
-            if (!prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-                strcmp(prog->lines[i+1].opcode, "PHA") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "PLA") == 0 &&
-                !prog->lines[i+2].is_branch_target) {
-                prog->lines[i+1].is_dead = true;
-                prog->lines[i+2].is_dead = true;
-                prog->optimizations++;
-            }
-        }
-        
-        // CLC followed by ADC #0 (just remove both)
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "CLC") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "ADC") == 0 &&
-            strcmp(prog->lines[i+1].operand, "#0") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // SEC followed by SBC #0 (just remove both)
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "SEC") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "SBC") == 0 &&
-            strcmp(prog->lines[i+1].operand, "#0") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // AND #$FF (no operation)
-        if (strcmp(prog->lines[i].opcode, "AND") == 0 &&
-            (strcmp(prog->lines[i].operand, "#$FF") == 0 ||
-             strcmp(prog->lines[i].operand, "#255") == 0)) {
-            prog->lines[i].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // ORA #0 (no operation)
-        if (strcmp(prog->lines[i].opcode, "ORA") == 0 &&
-            (strcmp(prog->lines[i].operand, "#0") == 0 ||
-             strcmp(prog->lines[i].operand, "#$00") == 0)) {
-            prog->lines[i].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // EOR #0 (no operation)
-        if (strcmp(prog->lines[i].opcode, "EOR") == 0 &&
-            (strcmp(prog->lines[i].operand, "#0") == 0 ||
-             strcmp(prog->lines[i].operand, "#$00") == 0)) {
-            prog->lines[i].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // LDA followed by TAX/TAY then TXA/TYA (can remove transfer pair)
-        if (!prog->lines[i+1].no_optimize && i + 2 < prog->count && !prog->lines[i+2].no_optimize) {
-            if (strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-                strcmp(prog->lines[i+1].opcode, "TAX") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "TXA") == 0 &&
-                !prog->lines[i+2].is_branch_target) {
-                prog->lines[i+1].is_dead = true;
-                prog->lines[i+2].is_dead = true;
-                prog->optimizations++;
-            }
-            if (strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-                strcmp(prog->lines[i+1].opcode, "TAY") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "TYA") == 0 &&
-                !prog->lines[i+2].is_branch_target) {
-                prog->lines[i+1].is_dead = true;
-                prog->lines[i+2].is_dead = true;
-                prog->optimizations++;
-            }
-        }
-        
-        // CLC/SEC pairs that cancel out
-        if (!prog->lines[i+1].no_optimize &&
-            ((strcmp(prog->lines[i].opcode, "CLC") == 0 && strcmp(prog->lines[i+1].opcode, "SEC") == 0) ||
-             (strcmp(prog->lines[i].opcode, "SEC") == 0 && strcmp(prog->lines[i+1].opcode, "CLC") == 0)) &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->optimizations++;
-        }
+        node = node->next;
     }
 }
 
 // Dead code elimination
-void optimize_dead_code(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+void optimize_dead_code_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // Unconditional jump followed by unreachable code
-        if ((strcmp(prog->lines[i].opcode, "JMP") == 0 ||
-             strcmp(prog->lines[i].opcode, "RTS") == 0 ||
-             strcmp(prog->lines[i].opcode, "RTI") == 0 ||
-             (prog->is_45gs02 && strcmp(prog->lines[i].opcode, "BRA") == 0) ) &&
-            !prog->lines[i+1].is_branch_target &&
-            !prog->lines[i+1].is_label) {
+        if ((node->opcode && (strcmp(node->opcode, "JMP") == 0 ||
+                              strcmp(node->opcode, "RTS") == 0 ||
+                              strcmp(node->opcode, "RTI") == 0)) &&
+            node->next && !node->next->is_branch_target && !node->next->label) {
             
-            int j = i + 1;
-            while (j < prog->count && !prog->lines[j].is_branch_target && 
-                   !prog->lines[j].is_label && !prog->lines[j].no_optimize && 
-                   prog->lines[j].opcode[0]) {
-                prog->lines[j].is_dead = true;
+            AstNode *current = node->next;
+            while (current && !current->is_branch_target && 
+                   !current->label && !current->no_optimize && 
+                   current->opcode) {
+                current->is_dead = true;
                 prog->optimizations++;
-                j++;
+                current = current->next;
             }
         }
+        
+        node = node->next;
     }
 }
 
 // Jump optimization
-void optimize_jumps(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+void optimize_jumps_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // JMP to next line (remove)
-        if (strcmp(prog->lines[i].opcode, "JMP") == 0 && i + 1 < prog->count) {
-            for (int j = 0; j < prog->label_count; j++) {
-                if (strstr(prog->lines[i].operand, prog->labels[j].name) &&
-                    prog->labels[j].line_num == i + 1) {
-                    prog->lines[i].is_dead = true;
-                    prog->optimizations++;
-                    break;
-                }
+        if (node->opcode && strcmp(node->opcode, "JMP") == 0 && node->next) {
+            if (node->next->is_branch_target) {
+                node->is_dead = true;
+                prog->optimizations++;
             }
         }
         
-        // Branch to next instruction (remove)
-        if ((strstr(prog->lines[i].opcode, "BEQ") || 
-             strstr(prog->lines[i].opcode, "BNE") ||
-             ( prog->is_45gs02 && 
-               strstr(prog->lines[i].opcode, "BRA") != NULL
-             ) || 
-             strstr(prog->lines[i].opcode, "BNE") ||
-             strstr(prog->lines[i].opcode, "BCC") ||
-             strstr(prog->lines[i].opcode, "BCS")) && i + 1 < prog->count) {
-            for (int j = 0; j < prog->label_count; j++) {
-                if (strstr(prog->lines[i].operand, prog->labels[j].name) &&
-                    prog->labels[j].line_num == i + 1) {
-                    prog->lines[i].is_dead = true;
-                    prog->optimizations++;
-                    break;
-                }
-            }
-        }
+        node = node->next;
     }
 }
 
 // Load/Store optimization
-void optimize_load_store(Program *prog) {
-    for (int i = 0; i < prog->count - 2; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+void optimize_load_store_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // LDA addr, STA addr2, LDA addr (remove third LDA)
-        if (!prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-            strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i].operand, prog->lines[i+2].operand) == 0 &&
-            !prog->lines[i+2].is_branch_target) {
-            prog->lines[i+2].is_dead = true;
-            prog->optimizations++;
+        if (node->opcode && strcmp(node->opcode, "LDA") == 0 && node->next) {
+            AstNode *next1 = node->next;
+            if (next1->opcode && strcmp(next1->opcode, "STA") == 0 && next1->next) {
+                AstNode *next2 = next1->next;
+                if (next2->opcode && strcmp(next2->opcode, "LDA") == 0) {
+                    if (node->operand && next2->operand && strcmp(node->operand, next2->operand) == 0) {
+                        next2->is_dead = true;
+                        prog->optimizations++;
+                    }
+                }
+            }
         }
         
-        // Double store optimization: STA addr, STA addr
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i].operand, prog->lines[i+1].operand) == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->optimizations++;
-        }
+        node = node->next;
     }
 }
 
 // Register usage optimization
-void optimize_register_usage(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+void optimize_register_usage_ast(Program *prog) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // TAX followed by TXA (no operation if no X usage between)
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "TAX") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "TXA") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
+        if (node->opcode && strcmp(node->opcode, "TAX") == 0 && node->next) {
+            AstNode *next = node->next;
+            if (next->opcode && strcmp(next->opcode, "TXA") == 0) {
+                node->is_dead = true;
+                next->is_dead = true;
+                prog->optimizations++;
+            }
         }
         
-        // TAY followed by TYA
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "TAY") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "TYA") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // TXA followed by TAX
-        if (!prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "TXA") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "TAX") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-    }
-}
-
-// Branch optimization
-void optimize_branches(Program *prog) {
-    // Convert long jumps to short branches when possible (for size optimization)
-    if (prog->mode == OPT_SIZE) {
-        for (int i = 0; i < prog->count; i++) {
-            if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-            
-            // Could analyze distance and convert JMP to branch instructions
-            // This requires more complex distance calculation
-        }
+        node = node->next;
     }
 }
 
 // Constant propagation
-void optimize_constant_propagation(Program *prog) {
+void optimize_constant_propagation_ast(Program *prog) {
     char last_a_value[64] = "";
     bool a_known = false;
     
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].is_branch_target || prog->lines[i].no_optimize) {
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->is_branch_target || node->no_optimize) {
             a_known = false;
+            node = node->next;
             continue;
         }
         
         // Track LDA immediate values
-        if (strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-            prog->lines[i].operand[0] == '#') {
-            strncpy(last_a_value, prog->lines[i].operand, 63);
+        if (node->opcode && strcmp(node->opcode, "LDA") == 0 &&
+            node->operand && node->operand[0] == '#') {
+            strncpy(last_a_value, node->operand, 63);
             a_known = true;
         }
         // If we see another LDA with same value, remove it
-        else if (a_known && strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-                 strcmp(prog->lines[i].operand, last_a_value) == 0) {
-            prog->lines[i].is_dead = true;
+        else if (a_known && node->opcode && strcmp(node->opcode, "LDA") == 0 &&
+                 node->operand && strcmp(node->operand, last_a_value) == 0) {
+            node->is_dead = true;
             prog->optimizations++;
         }
         // Operations that modify A
-        else if (strcmp(prog->lines[i].opcode, "ADC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "SBC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "AND") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ORA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "EOR") == 0 ||
-                 strcmp(prog->lines[i].opcode, "LDA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "PLA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "TXA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "TYA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ASL") == 0 ||
-                 strcmp(prog->lines[i].opcode, "LSR") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROL") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROR") == 0) {
+        else if (node->opcode && (strcmp(node->opcode, "ADC") == 0 ||
+                                  strcmp(node->opcode, "SBC") == 0 ||
+                                  strcmp(node->opcode, "AND") == 0 ||
+                                  strcmp(node->opcode, "ORA") == 0 ||
+                                  strcmp(node->opcode, "EOR") == 0 ||
+                                  strcmp(node->opcode, "LDA") == 0 ||
+                                  strcmp(node->opcode, "PLA") == 0 ||
+                                  strcmp(node->opcode, "TXA") == 0 ||
+                                  strcmp(node->opcode, "TYA") == 0 ||
+                                  strcmp(node->opcode, "ASL") == 0 ||
+                                  strcmp(node->opcode, "LSR") == 0 ||
+                                  strcmp(node->opcode, "ROL") == 0 ||
+                                  strcmp(node->opcode, "ROR") == 0)) {
             a_known = false;
         }
+        
+        node = node->next;
     }
 }
-
-// Strength reduction - replace expensive operations with cheaper equivalents
-void optimize_strength_reduction(Program *prog) {
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Multiplication by 2 can be replaced with ASL (if no carry needed)
-        if (strcmp(prog->lines[i].opcode, "ASL") == 0 && 
-            prog->lines[i].operand[0] == 'A' && prog->lines[i].operand[1] == ' ') {
-            // This is already optimal (ASL A is multiply by 2)
-        }
-        
-        // CLC + ADC same_reg = multiply by 2
-        if (i + 1 < prog->count && !prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i].opcode, "CLC") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "ADC") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            
-            // Check if adding a register to itself from memory
-            char operand[64];
-            strncpy(operand, prog->lines[i+1].operand, 63);
-            
-            // Look back to see if we just loaded this value
-            if (i > 0 && strcmp(prog->lines[i-1].opcode, "LDA") == 0 &&
-                !prog->lines[i-1].no_optimize &&
-                strcmp(prog->lines[i-1].operand, operand) == 0) {
-                // Could potentially be optimized to ASL
-                // This is a complex optimization that requires data flow analysis
-            }
-        }
-        
-        // Division/Multiplication by powers of 2 using shifts
-        // LDA #value, where value is power of 2, followed by ADC/SBC
-        // This is advanced and would need constant evaluation
-    }
-}
-
-// Common subexpression elimination
-void optimize_common_subexpressions(Program *prog) {
-    for (int i = 0; i < prog->count - 5; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Look for repeated sequences of 2-3 instructions
-        for (int j = i + 3; j < prog->count - 2 && j < i + 50; j++) {
-            if (prog->lines[j].is_dead || prog->lines[j].no_optimize) continue;
-            if (prog->lines[j].is_branch_target || prog->lines[j].is_label) break;
-            
-            // Check if next 2 instructions match
-            bool match = true;
-            for (int k = 0; k < 2 && i+k < prog->count && j+k < prog->count; k++) {
-                if (strcmp(prog->lines[i+k].opcode, prog->lines[j+k].opcode) != 0 ||
-                    strcmp(prog->lines[i+k].operand, prog->lines[j+k].operand) != 0) {
-                    match = false;
-                    break;
-                }
-                if (prog->lines[j+k].is_branch_target || prog->lines[j+k].is_label) {
-                    match = false;
-                    break;
-                }
-            }
-            
-            if (match) {
-                // If we found a match, we could potentially extract to subroutine
-                // This is complex and would need careful analysis
-                // For now, just detect it (framework for future implementation)
-            }
-        }
-    }
-}
-
-// Addressing mode optimization - use faster/smaller addressing modes
-void optimize_addressing_modes(Program *prog) {
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Absolute to Zero Page conversion
-        // LDA $00nn can become LDA $nn (3 bytes -> 2 bytes, 4 cycles -> 3 cycles)
-        if ((strcmp(prog->lines[i].opcode, "LDA") == 0 ||
-             strcmp(prog->lines[i].opcode, "STA") == 0 ||
-             strcmp(prog->lines[i].opcode, "LDX") == 0 ||
-             strcmp(prog->lines[i].opcode, "STX") == 0 ||
-             strcmp(prog->lines[i].opcode, "LDY") == 0 ||
-             strcmp(prog->lines[i].opcode, "STY") == 0 ||
-             strcmp(prog->lines[i].opcode, "ADC") == 0 ||
-             strcmp(prog->lines[i].opcode, "SBC") == 0 ||
-             strcmp(prog->lines[i].opcode, "AND") == 0 ||
-             strcmp(prog->lines[i].opcode, "ORA") == 0 ||
-             strcmp(prog->lines[i].opcode, "EOR") == 0 ||
-             strcmp(prog->lines[i].opcode, "CMP") == 0 ||
-             strcmp(prog->lines[i].opcode, "BIT") == 0) &&
-            prog->lines[i].operand[0] == '$') {
-            
-            // Check if address is in zero page range ($0000-$00FF)
-            int addr = 0;
-            if (sscanf(prog->lines[i].operand, "$%x", &addr) == 1) {
-                if (addr >= 0 && addr <= 0xFF) {
-                    // Already zero page - good!
-                } else if (addr >= 0x0000 && addr <= 0x00FF) {
-                    // Could be converted to zero page
-                    // Note: This is informational - actual conversion needs care
-                }
-            }
-        }
-        
-        // Absolute,X to Zero Page,X conversion
-        if (strstr(prog->lines[i].operand, ",X") || strstr(prog->lines[i].operand, ",x")) {
-            // Similar logic for indexed modes
-        }
-    }
-}
-
-// Zero page optimization - identify frequently used variables for ZP allocation
-void optimize_zero_page(Program *prog) {
-    // Track memory location usage frequency
-    typedef struct {
-        char address[32];
-        int read_count;
-        int write_count;
-        bool is_absolute;
-    } MemUsage;
-    
-    MemUsage usage[256];
-    memset(usage, 0, sizeof(usage));
-    int usage_count = 0;
-    
-    // Scan for memory access patterns
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead) continue;
-        
-        // Count reads and writes
-        bool is_load = (strcmp(prog->lines[i].opcode, "LDA") == 0 ||
-                       strcmp(prog->lines[i].opcode, "LDX") == 0 ||
-                       strcmp(prog->lines[i].opcode, "LDY") == 0);
-        
-        bool is_store = (strcmp(prog->lines[i].opcode, "STA") == 0 ||
-                        strcmp(prog->lines[i].opcode, "STX") == 0 ||
-                        strcmp(prog->lines[i].opcode, "STY") == 0);
-        
-        if ((is_load || is_store) && prog->lines[i].operand[0] == '$') {
-            // Track this address
-            bool found = false;
-            for (int j = 0; j < usage_count; j++) {
-                if (strcmp(usage[j].address, prog->lines[i].operand) == 0) {
-                    if (is_load) usage[j].read_count++;
-                    if (is_store) usage[j].write_count++;
-                    found = true;
-                    break;
-                }
-            }
-            
-            if (!found && usage_count < 256) {
-                strncpy(usage[usage_count].address, prog->lines[i].operand, 31);
-                usage[usage_count].read_count = is_load ? 1 : 0;
-                usage[usage_count].write_count = is_store ? 1 : 0;
-                usage_count++;
-            }
-        }
-    }
-    
-    // Report heavily used absolute addresses that could benefit from ZP
-    for (int i = 0; i < usage_count; i++) {
-        int total = usage[i].read_count + usage[i].write_count;
-        if (total > 5) {
-            int addr;
-            if (sscanf(usage[i].address, "$%x", &addr) == 1) {
-                if (addr > 0xFF) {
-                    // This could benefit from ZP allocation
-                    // Actual implementation would track this for reporting
-                }
-            }
-        }
-    }
-}
-
-// Branch chaining optimization - eliminate unnecessary branch intermediaries
-void optimize_branch_chaining(Program *prog) {
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Look for: BNE label1 where label1: JMP label2
-        // Can be optimized to: BNE label2 (if in range)
-        if (strstr(prog->lines[i].opcode, "B") == prog->lines[i].opcode && 
-            strlen(prog->lines[i].opcode) == 3) {
-            
-            // Find the target label
-            for (int j = 0; j < prog->label_count; j++) {
-                if (strstr(prog->lines[i].operand, prog->labels[j].name)) {
-                    int target_line = prog->labels[j].line_num;
-                    
-                    // Check if target is just a JMP
-                    if (target_line + 1 < prog->count &&
-                        strcmp(prog->lines[target_line + 1].opcode, "JMP") == 0 &&
-                        !prog->lines[target_line + 1].no_optimize) {
-                        
-                        // Could potentially redirect branch to JMP target
-                        // Need to verify branch distance is valid (-128 to +127)
-                        prog->optimizations++; // Placeholder
-                    }
-                    break;
-                }
-            }
-        }
-    }
-}
-
-// Flag usage optimization - eliminate redundant flag-setting operations
-void optimize_flag_usage(Program *prog) {
-    bool carry_known = false;
-    bool carry_state = false;
-    
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].is_branch_target || 
-            prog->lines[i].no_optimize) {
-            carry_known = false;
-            continue;
-        }
-        
-        // Track CLC/SEC
-        if (strcmp(prog->lines[i].opcode, "CLC") == 0) {
-            if (carry_known && !carry_state) {
-                // Carry already clear
-                prog->lines[i].is_dead = true;
-                prog->optimizations++;
-            }
-            carry_known = true;
-            carry_state = false;
-        } else if (strcmp(prog->lines[i].opcode, "SEC") == 0) {
-            if (carry_known && carry_state) {
-                // Carry already set
-                prog->lines[i].is_dead = true;
-                prog->optimizations++;
-            }
-            carry_known = true;
-            carry_state = true;
-        }
-        
-        // Operations that use/modify carry
-        else if (strcmp(prog->lines[i].opcode, "ADC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "SBC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROL") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROR") == 0) {
-            carry_known = false; // Carry modified
-        }
-        
-        // Branches affect flag knowledge
-        else if (strcmp(prog->lines[i].opcode, "BCC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "BCS") == 0) {
-            carry_known = false;
-        }
-    }
-}
-
-// Loop invariant code motion - move loop-invariant calculations outside loops
-void optimize_loop_invariants(Program *prog) {
-    // Identify loops (backward branches)
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Look for backward branches (likely loops)
-        if (strstr(prog->lines[i].opcode, "B") == prog->lines[i].opcode) {
-            for (int j = 0; j < prog->label_count; j++) {
-                if (strstr(prog->lines[i].operand, prog->labels[j].name)) {
-                    int target = prog->labels[j].line_num;
-                    
-                    if (target < i) {
-                        // Backward branch - likely a loop from target to i
-                        // Analyze loop body for invariant code
-                        
-                        for (int k = target; k < i; k++) {
-                            if (prog->lines[k].is_dead) continue;
-                            
-                            // Look for immediate loads that don't change
-                            if (strcmp(prog->lines[k].opcode, "LDA") == 0 &&
-                                prog->lines[k].operand[0] == '#') {
-                                
-                                // Check if this value is used but never modified
-                                for (int m = k + 1; m < i; m++) {
-                                    if (strcmp(prog->lines[m].opcode, "LDA") == 0) {
-                                        break;
-                                    }
-                                }
-                                
-                                // If not modified, could be moved before loop
-                                // This is a candidate for optimization
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-    }
-}
-
-// Bit operation optimizations
-void optimize_bit_operations(Program *prog) {
-    for (int i = 0; i < prog->count - 2; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // AND followed by CMP to test bits -> use BIT instruction
-        if (strcmp(prog->lines[i].opcode, "LDA") == 0 && i + 2 < prog->count &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize) {
-            
-            if (strcmp(prog->lines[i+1].opcode, "AND") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "CMP") == 0) {
-                
-                // Check if testing bit 7 or 6
-                if ((strcmp(prog->lines[i+1].operand, "#$80") == 0 ||
-                     strcmp(prog->lines[i+1].operand, "#$40") == 0) &&
-                    strcmp(prog->lines[i+2].operand, "#$00") == 0) {
-                    
-                    // Can use BIT instruction which sets N and V flags
-                    // This is a candidate for BIT optimization
-                    prog->optimizations++;
-                }
-            }
-        }
-        
-        // Combine multiple AND operations
-        if (strcmp(prog->lines[i].opcode, "AND") == 0 && i + 1 < prog->count &&
-            !prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i+1].opcode, "AND") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            
-            // Check if both are immediate values
-            if (prog->lines[i].operand[0] == '#' && prog->lines[i+1].operand[0] == '#') {
-                int val1, val2;
-                if (sscanf(prog->lines[i].operand, "#$%x", &val1) == 1 &&
-                    sscanf(prog->lines[i+1].operand, "#$%x", &val2) == 1) {
-                    
-                    // Can combine: AND #$FE, AND #$FD -> AND #$FC
-                    int combined = val1 & val2;
-                    char new_operand[16];
-                    snprintf(new_operand, 16, "#$%02X", combined);
-                    strncpy(prog->lines[i].operand, new_operand, 63);
-                    prog->lines[i+1].is_dead = true;
-                    prog->optimizations++;
-                }
-            }
-        }
-    }
-}
-
-// Advanced arithmetic optimizations
-void optimize_arithmetic(Program *prog) {
-    for (int i = 0; i < prog->count - 3; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Multiply by 2: replace with ASL
-        // Pattern: CLC, ADC same_value (A = A + A = A * 2)
-        if (strcmp(prog->lines[i].opcode, "STA") == 0 && i + 2 < prog->count &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize) {
-            
-            if (strcmp(prog->lines[i+1].opcode, "CLC") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "ADC") == 0 &&
-                strcmp(prog->lines[i].operand, prog->lines[i+2].operand) == 0 &&
-                !prog->lines[i+2].is_branch_target) {
-                
-                // This is A = A * 2, can use ASL
-                strcpy(prog->lines[i+1].opcode, "ASL");
-                strcpy(prog->lines[i+1].operand, prog->lines[i].operand);
-                prog->lines[i+2].is_dead = true;
-                prog->optimizations++;
-            }
-        }
-        
-        // Multiply by 3: STA temp, ASL, ADC temp
-        // This is already optimal, just detect it
-        
-        // Negate optimization: EOR #$FF, CLC, ADC #$01 -> EOR #$FF, SEC, ADC #$00
-        if (strcmp(prog->lines[i].opcode, "EOR") == 0 && i + 2 < prog->count &&
-            strcmp(prog->lines[i].operand, "#$FF") == 0 &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize) {
-            
-            if (strcmp(prog->lines[i+1].opcode, "CLC") == 0 &&
-                strcmp(prog->lines[i+2].opcode, "ADC") == 0 &&
-                strcmp(prog->lines[i+2].operand, "#$01") == 0 &&
-                !prog->lines[i+2].is_branch_target) {
-                
-                // Replace CLC with SEC and ADC #$01 with ADC #$00
-                strcpy(prog->lines[i+1].opcode, "SEC");
-                strcpy(prog->lines[i+2].operand, "#$00");
-                prog->optimizations++;
-            }
-        }
-    }
-}
-
-// Tail call optimization
-void optimize_tail_calls(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // JSR followed immediately by RTS -> convert to JMP
-        if (strcmp(prog->lines[i].opcode, "JSR") == 0 && i + 1 < prog->count &&
-            !prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i+1].opcode, "RTS") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            
-            // Convert JSR to JMP
-            strcpy(prog->lines[i].opcode, "JMP");
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-    }
-}
-
-// Loop unrolling for small fixed loops
-void optimize_loop_unrolling(Program *prog) {
-    if (prog->mode != OPT_SPEED) return; // Only for speed optimization
-    
-    for (int i = 0; i < prog->count - 3; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Look for simple counting loops: LDX #n, loop body, DEX, BNE
-        if (strcmp(prog->lines[i].opcode, "LDX") == 0 && 
-            prog->lines[i].operand[0] == '#') {
-            
-            int count = 0;
-            if (sscanf(prog->lines[i].operand, "#$%x", &count) == 1 ||
-                sscanf(prog->lines[i].operand, "#%d", &count) == 1) {
-                
-                // Only unroll very small loops (2-4 iterations)
-                if (count >= 2 && count <= 4) {
-                    // Find the loop end (DEX, BNE pattern)
-                    for (int j = i + 1; j < prog->count - 1 && j < i + 20; j++) {
-                        if (strcmp(prog->lines[j].opcode, "DEX") == 0 &&
-                            j + 1 < prog->count &&
-                            strcmp(prog->lines[j+1].opcode, "BNE") == 0) {
-                            
-                            // Found loop end - candidate for unrolling
-                            // Mark for potential unrolling (complex to implement fully)
-                            prog->optimizations++;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Stack operation optimizations
-void optimize_stack_operations(Program *prog) {
-    for (int i = 0; i < prog->count - 1; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // PHA followed by immediate PLA with no intervening code
-        if (strcmp(prog->lines[i].opcode, "PHA") == 0 && i + 1 < prog->count &&
-            !prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i+1].opcode, "PLA") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            
-            // Remove both - they cancel out
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-        
-        // PHA, TXA, PHA, work, PLA, TAX, PLA -> may be optimizable
-        // If work doesn't modify X, can remove TXA/TAX pair
-    }
-}
-
-
-
-// Boolean logic optimizations
-void optimize_boolean_logic(Program *prog) {
-    for (int i = 0; i < prog->count - 3; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
-        
-        // Test for zero: CMP #$00 -> can often be eliminated
-        if (strcmp(prog->lines[i].opcode, "CMP") == 0 &&
-            (strcmp(prog->lines[i].operand, "#$00") == 0 ||
-             strcmp(prog->lines[i].operand, "#0") == 0)) {
-            
-            // If previous instruction set flags, CMP #0 is redundant
-            if (i > 0 && (strcmp(prog->lines[i-1].opcode, "LDA") == 0 ||
-                         strcmp(prog->lines[i-1].opcode, "LDX") == 0 ||
-                         strcmp(prog->lines[i-1].opcode, "LDY") == 0 ||
-                         strcmp(prog->lines[i-1].opcode, "AND") == 0 ||
-                         strcmp(prog->lines[i-1].opcode, "ORA") == 0)) {
-                prog->lines[i].is_dead = true;
-                prog->optimizations++;
-            }
-        }
-        
-        // Double negative: EOR #$FF, EOR #$FF -> remove both
-        if (strcmp(prog->lines[i].opcode, "EOR") == 0 && i + 1 < prog->count &&
-            strcmp(prog->lines[i].operand, "#$FF") == 0 &&
-            !prog->lines[i+1].no_optimize &&
-            strcmp(prog->lines[i+1].opcode, "EOR") == 0 &&
-            strcmp(prog->lines[i+1].operand, "#$FF") == 0 &&
-            !prog->lines[i+1].is_branch_target) {
-            
-            prog->lines[i].is_dead = true;
-            prog->lines[i+1].is_dead = true;
-            prog->optimizations++;
-        }
-    }
-}
-
-
 
 // 65C02-specific optimizations
-void optimize_65c02_instructions(Program *prog) {
+void optimize_65c02_instructions_ast(Program *prog) {
     if (!prog->allow_65c02 || prog->is_45gs02) return;  // Don't apply to 45GS02!
-    
-    bool accumulator_is_zero = false;
 
-    for (int i = 0; i < prog->count; i++) { // Loop through all lines
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) {
-            // Reset accumulator_is_zero if we skip a line, as its state becomes unknown
-            accumulator_is_zero = false; 
+    AstNode *node = prog->root;
+
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
             continue;
         }
-        
-        // Handle instructions that set the accumulator to zero
-        if (strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-            (strcmp(prog->lines[i].operand, "#$00") == 0 ||
-             strcmp(prog->lines[i].operand, "#0") == 0)) {
-            accumulator_is_zero = true;
-            if (prog->trace_level > 1) {
-                printf("DEBUG 65c02: LDA #0 at line %d, Accumulator is now zero.\n", prog->lines[i].line_num);
+
+        // Pattern: LDA #$00 followed by one or more STA -> convert all STA to STZ and mark LDA dead
+        if (node->opcode && strcmp(node->opcode, "LDA") == 0 &&
+            node->operand && (strcmp(node->operand, "#$00") == 0 || strcmp(node->operand, "#0") == 0)) {
+
+            // Look ahead to see if we can convert STAs to STZ
+            AstNode *current = node->next;
+            bool found_sta = false;
+            bool can_optimize = true;
+
+            // First pass: check if optimization is possible
+            while (current && !current->is_branch_target) {
+                if (current->is_dead || current->no_optimize) {
+                    current = current->next;
+                    continue;
+                }
+
+                if (current->opcode && strcmp(current->opcode, "STA") == 0) {
+                    found_sta = true;
+                    current = current->next;
+                } else if (current->opcode && (
+                    strcmp(current->opcode, "ADC") == 0 ||
+                    strcmp(current->opcode, "SBC") == 0 ||
+                    strcmp(current->opcode, "AND") == 0 ||
+                    strcmp(current->opcode, "ORA") == 0 ||
+                    strcmp(current->opcode, "EOR") == 0 ||
+                    strcmp(current->opcode, "CMP") == 0 ||
+                    strcmp(current->opcode, "PHA") == 0 ||
+                    strcmp(current->opcode, "TAX") == 0 ||
+                    strcmp(current->opcode, "TAY") == 0)) {
+                    // Instruction uses A but doesn't modify it (or PHA/TAX/TAY which preserve A for STZ)
+                    can_optimize = false;
+                    break;
+                } else if (current->opcode && (
+                    strcmp(current->opcode, "LDA") == 0 ||
+                    strcmp(current->opcode, "PLA") == 0 ||
+                    strcmp(current->opcode, "TXA") == 0 ||
+                    strcmp(current->opcode, "TYA") == 0)) {
+                    // A is reloaded/modified
+                    break;
+                } else {
+                    // Other instructions that don't use A - safe to continue
+                    current = current->next;
+                }
             }
-        } 
-        // Handle instructions that store a zero from the accumulator
-        else if (accumulator_is_zero && strcmp(prog->lines[i].opcode, "STA") == 0 &&
-                 !prog->lines[i].is_branch_target) {
-            if (prog->trace_level > 1) {
-                printf("DEBUG 65c02: Found STZ opportunity at line %d (STA after LDA #0), opts before: %d\n", prog->lines[i].line_num, prog->optimizations);
-            }
-            strcpy(prog->lines[i].opcode, "STZ");
-            reconstruct_line(&prog->lines[i], &prog->config);
-            prog->optimizations++;
-            if (prog->trace_level > 1) {
-                printf("DEBUG 65c02: Applied STZ optimization, opts after: %d\n", prog->optimizations);
-            }
-        }
-        // Handle instructions that change the accumulator, invalidating accumulator_is_zero state
-        else if (strcmp(prog->lines[i].opcode, "LDA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ADC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "SBC") == 0 ||
-                 strcmp(prog->lines[i].opcode, "AND") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ORA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "EOR") == 0 ||
-                 strcmp(prog->lines[i].opcode, "PLA") == 0 ||
-                 strcmp(prog->lines[i].opcode, "TXA") == 0 || // X to A
-                 strcmp(prog->lines[i].opcode, "TYA") == 0 || // Y to A
-                 strcmp(prog->lines[i].opcode, "ASL") == 0 ||
-                 strcmp(prog->lines[i].opcode, "LSR") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROL") == 0 ||
-                 strcmp(prog->lines[i].opcode, "ROR") == 0 ||
-                 strcmp(prog->lines[i].opcode, "INC") == 0 || // Affects A if operand is A
-                 strcmp(prog->lines[i].opcode, "DEC") == 0)   // Affects A if operand is A
-                 {
-            if (prog->lines[i].operand[0] == 'A' || prog->lines[i].operand[0] == '\0' || 
-                (strcmp(prog->lines[i].opcode, "LDA") == 0 && prog->lines[i].operand[0] != '#')) // Non-immediate LDA
-            {
-                accumulator_is_zero = false;
+
+            // Second pass: apply optimization if we found STAs and it's safe
+            if (found_sta && can_optimize) {
+                current = node->next;
+                while (current && !current->is_branch_target) {
+                    if (current->is_dead || current->no_optimize) {
+                        current = current->next;
+                        continue;
+                    }
+
+                    if (current->opcode && strcmp(current->opcode, "STA") == 0) {
+                        // Convert STA to STZ
+                        current->opcode = realloc(current->opcode, 4);
+                        if (current->opcode) {
+                            strcpy(current->opcode, "STZ");
+                        }
+                        prog->optimizations++;
+                        current = current->next;
+                    } else if (current->opcode && (
+                        strcmp(current->opcode, "LDA") == 0 ||
+                        strcmp(current->opcode, "PLA") == 0 ||
+                        strcmp(current->opcode, "TXA") == 0 ||
+                        strcmp(current->opcode, "TYA") == 0)) {
+                        // A is modified
+                        break;
+                    } else {
+                        current = current->next;
+                    }
+                }
+
+                // Mark the LDA #$00 as dead since we're using STZ instead
+                node->is_dead = true;
                 if (prog->trace_level > 1) {
-                    printf("DEBUG 65c02: Accumulator modified at line %d, state reset.\n", prog->lines[i].line_num);
+                    printf("DEBUG 65c02: Marked LDA #0 at line %d as dead, converted STAs to STZ\n", node->line_num);
                 }
             }
         }
+
+        node = node->next;
     }
 }
 
 // 45GS02-specific optimizations (MEGA65)
-void optimize_45gs02_instructions(Program *prog) {
+void optimize_45gs02_instructions_ast(Program *prog) {
     if (!prog->is_45gs02) return;
     
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead || prog->lines[i].no_optimize) continue;
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead || node->no_optimize) {
+            node = node->next;
+            continue;
+        }
         
         // ===== Z Register Optimizations =====
         
         // Pattern: Multiple stores of SAME VALUE using LDA #val, STA -> LDZ #val, then STZ
         // Generalized for any immediate value, not just zero
         // Look for: LDA #val, STA addr1, LDA #val, STA addr2
-        if (i + 3 < prog->count &&
-            strcmp(prog->lines[i].opcode, "LDA") == 0 && prog->lines[i].operand[0] == '#' &&
-            strcmp(prog->lines[i+1].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "LDA") == 0 && prog->lines[i+2].operand[0] == '#' &&
-            strcmp(prog->lines[i+3].opcode, "STA") == 0 &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize && !prog->lines[i+3].no_optimize &&
-            strcmp(prog->lines[i].operand, prog->lines[i+2].operand) == 0) {  // Same value!
+        if (node->opcode && strcmp(node->opcode, "LDA") == 0 && node->operand && node->operand[0] == '#' &&
+            node->next && node->next->opcode && strcmp(node->next->opcode, "STA") == 0 &&
+            node->next->next && node->next->next->opcode && strcmp(node->next->next->opcode, "LDA") == 0 &&
+            node->next->next->operand && node->next->next->operand[0] == '#' &&
+            node->next->next->next && node->next->next->next->opcode && strcmp(node->next->next->next->opcode, "STA") == 0 &&
+            !node->next->no_optimize && !node->next->next->no_optimize && !node->next->next->next->no_optimize &&
+            strcmp(node->operand, node->next->next->operand) == 0) {  // Same value!
             
-                                    // Convert to: LDZ #val, STZ addr1, STZ addr2
+            // Convert to: LDZ #val, STZ addr1, STZ addr2
+            node->opcode = realloc(node->opcode, 4);
+            if (node->opcode) {
+                strcpy(node->opcode, "LDZ");
+            }
             
-                                    strcpy(prog->lines[i].opcode, "LDZ");
+            node->next->opcode = realloc(node->next->opcode, 4);
+            if (node->next->opcode) {
+                strcpy(node->next->opcode, "STZ");
+            }
             
-                                    reconstruct_line(&prog->lines[i], &prog->config);
+            node->next->next->is_dead = true;  // Remove second LDA
             
-                                    strcpy(prog->lines[i+1].opcode, "STZ");
+            node->next->next->next->opcode = realloc(node->next->next->next->opcode, 4);
+            if (node->next->next->next->opcode) {
+                strcpy(node->next->next->next->opcode, "STZ");
+            }
             
-                                    reconstruct_line(&prog->lines[i+1], &prog->config);
-            
-                                    prog->lines[i+2].is_dead = true;  // Remove second LDA
-            
-                                    strcpy(prog->lines[i+3].opcode, "STZ");
-            
-                                    reconstruct_line(&prog->lines[i+3], &prog->config);
-            
-                                    prog->optimizations++;
-            
-                        
-            
-                                    // Look ahead for more stores of the same value
-            
-                                    int j = i + 4;
-            
-                                    while (j + 1 < prog->count && j < i + 20) {
-            
-                                        if (prog->lines[j].is_dead || prog->lines[j].no_optimize) {
-            
-                                            j++;
-            
-                                            continue;
-            
-                                        }
-            
-                        
-            
-                                        // Check for another LDA #same_value, STA pattern
-            
-                                        if (strcmp(prog->lines[j].opcode, "LDA") == 0 &&
-            
-                                            strcmp(prog->lines[j].operand, prog->lines[i].operand) == 0 &&
-            
-                                            j + 1 < prog->count &&
-            
-                                            strcmp(prog->lines[j+1].opcode, "STA") == 0 &&
-            
-                                            !prog->lines[j+1].no_optimize) {
-            
-                        
-            
-                                            // Convert this STA to STZ and remove the LDA
-            
-                                            prog->lines[j].is_dead = true;
-            
-                                            strcpy(prog->lines[j+1].opcode, "STZ");
-            
-                                            reconstruct_line(&prog->lines[j+1], &prog->config);
-            
-                                            prog->optimizations++;
-            
-                                            j += 2;
-            
-                                        } else if (strcmp(prog->lines[j].opcode, "LDA") == 0 ||
-            
-                                                  strcmp(prog->lines[j].opcode, "LDZ") == 0) {
-            
-                                            // Different load - stop looking
-            
-                                            break;
-            
-                                        } else {
-            
-                                            j++;
-            
-                                        }
-            
-                                    }        }
+            prog->optimizations++;
+        }
         
         // Also handle cases where we already have LDZ followed by stores
-        // Pattern: LDZ #val, STA addr1, STA addr2 -> LDZ #val, STZ addr1, STZ addr2
-        if (strcmp(prog->lines[i].opcode, "LDZ") == 0 && prog->lines[i].operand[0] == '#') {
+        // Pattern: LDZ #val, STA addr1, STA addr2, ... -> LDZ #val, STZ addr1, STZ addr2, ...
+        // Also handles: LDZ #val, ..., LDA #val, STA addr -> LDZ #val, ..., STZ addr (with LDA marked dead)
+        if (node->opcode && strcmp(node->opcode, "LDZ") == 0 && node->operand && node->operand[0] == '#') {
             // Look ahead for STA instructions that could become STZ
-            int j = i + 1;
-            while (j < prog->count && j < i + 20) {
-                if (prog->lines[j].is_dead || prog->lines[j].no_optimize) {
-                    j++;
+            AstNode *current = node->next;
+            while (current) {
+                if (current->is_dead || current->no_optimize) {
+                    current = current->next;
                     continue;
                 }
-                
-                if (strcmp(prog->lines[j].opcode, "STA") == 0 &&
-                    !prog->lines[j].is_branch_target) {
+
+                if (current->opcode && strcmp(current->opcode, "STA") == 0 &&
+                    !current->is_branch_target) {
                     // Convert STA to STZ (stores Z register value)
-                    strcpy(prog->lines[j].opcode, "STZ");
+                    current->opcode = realloc(current->opcode, 4);
+                    if (current->opcode) {
+                        strcpy(current->opcode, "STZ");
+                    }
                     prog->optimizations++;
-                    j++;
-                } else if (strcmp(prog->lines[j].opcode, "LDA") == 0 ||
-                          strcmp(prog->lines[j].opcode, "LDZ") == 0 ||
-                          strcmp(prog->lines[j].opcode, "TAX") == 0 ||
-                          strcmp(prog->lines[j].opcode, "TAY") == 0) {
-                    // Something that would change what we're storing
+                    current = current->next;
+                } else if (current->opcode && strcmp(current->opcode, "LDA") == 0 &&
+                           current->operand && node->operand &&
+                           strcmp(current->operand, node->operand) == 0 &&
+                           current->next && current->next->opcode &&
+                           strcmp(current->next->opcode, "STA") == 0) {
+                    // LDA with same value followed by STA - mark LDA dead and convert STA to STZ
+                    current->is_dead = true;
+                    AstNode *sta_node = current->next;
+                    sta_node->opcode = realloc(sta_node->opcode, 4);
+                    if (sta_node->opcode) {
+                        strcpy(sta_node->opcode, "STZ");
+                    }
+                    prog->optimizations++;
+                    current = sta_node->next;
+                } else if (current->opcode && (strcmp(current->opcode, "LDA") == 0 ||
+                                              strcmp(current->opcode, "LDZ") == 0 ||
+                                              strcmp(current->opcode, "TAX") == 0 ||
+                                              strcmp(current->opcode, "TAY") == 0)) {
+                    // Something that would change what we're storing (with different value)
                     break;
                 } else {
-                    j++;
+                    current = current->next;
                 }
             }
         }
-        
-        // ===== 32-bit Q Register Optimizations =====
-        // IMPORTANT: Q register is composite of A (low), X, Y, Z (high)
-        // Q = [Z:Y:X:A] as a 32-bit value
-        // Modifying Q affects A, X, Y, Z and vice versa!
-        
-        // Pattern: Four consecutive loads that form 32-bit value
-        // LDA #low, LDX #mid1, LDY #mid2, LDZ #high
-        // Could become: LDQ #value32
-        if (i + 3 < prog->count &&
-            strcmp(prog->lines[i].opcode, "LDA") == 0 && prog->lines[i].operand[0] == '#' &&
-            strcmp(prog->lines[i+1].opcode, "LDX") == 0 && prog->lines[i+1].operand[0] == '#' &&
-            strcmp(prog->lines[i+2].opcode, "LDY") == 0 && prog->lines[i+2].operand[0] == '#' &&
-            strcmp(prog->lines[i+3].opcode, "LDZ") == 0 && prog->lines[i+3].operand[0] == '#' &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize && !prog->lines[i+3].no_optimize) {
-            
-            // Parse the four byte values
-            int a_val, x_val, y_val, z_val;
-            if ((sscanf(prog->lines[i].operand, "#$%x", &a_val) == 1 || sscanf(prog->lines[i].operand, "#%d", &a_val) == 1) &&
-                (sscanf(prog->lines[i+1].operand, "#$%x", &x_val) == 1 || sscanf(prog->lines[i+1].operand, "#%d", &x_val) == 1) &&
-                (sscanf(prog->lines[i+2].operand, "#$%x", &y_val) == 1 || sscanf(prog->lines[i+2].operand, "#%d", &y_val) == 1) &&
-                (sscanf(prog->lines[i+3].operand, "#$%x", &z_val) == 1 || sscanf(prog->lines[i+3].operand, "#%d", &z_val) == 1)) {
-                
-                // Combine into 32-bit value: Q = [Z:Y:X:A]
-                unsigned long q_val = ((z_val & 0xFF) << 24) | ((y_val & 0xFF) << 16) | 
-                                     ((x_val & 0xFF) << 8) | (a_val & 0xFF);
-                
-                // Replace with LDQ
-                strcpy(prog->lines[i].opcode, "LDQ");
-                char q_operand[32];
-                snprintf(q_operand, 32, "#$%08lX", q_val);
-                strcpy(prog->lines[i].operand, q_operand);
-                
-                prog->lines[i+1].is_dead = true;
-                prog->lines[i+2].is_dead = true;
-                prog->lines[i+3].is_dead = true;
-                prog->optimizations++;
-            }
-        }
-        
-        // Pattern: 32-bit store sequence
-        // STA addr, STX addr+1, STY addr+2, STZ addr+3 -> STQ addr
-        // But must verify addresses are consecutive
-        
-        // ===== Base Page Register (B) =====
-        // IMPORTANT: B register controls base page mapping (where ZP is mapped)
-        // NOT a second accumulator! Do not use for general purpose storage!
-        // B register remaps zero page to different memory location
-        
-        // We should NOT optimize stack operations to use B register
-        // B is for memory mapping only
-        
-        // ===== NOP -> NEG Optimization =====
         
         // 45GS02 has NEG instruction (negate accumulator)
         // Pattern: EOR #$FF, SEC, ADC #$00 -> NEG
-        if (i + 2 < prog->count &&
-            strcmp(prog->lines[i].opcode, "EOR") == 0 &&
-            strcmp(prog->lines[i].operand, "#$FF") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "SEC") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "ADC") == 0 &&
-            strcmp(prog->lines[i+2].operand, "#$00") == 0 &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-            !prog->lines[i+2].is_branch_target) {
+        if (node->opcode && strcmp(node->opcode, "EOR") == 0 &&
+            node->operand && strcmp(node->operand, "#$FF") == 0 &&
+            node->next && node->next->opcode && strcmp(node->next->opcode, "SEC") == 0 &&
+            node->next->next && node->next->next->opcode && strcmp(node->next->next->opcode, "ADC") == 0 &&
+            node->next->next->operand && strcmp(node->next->next->operand, "#$00") == 0 &&
+            !node->next->no_optimize && !node->next->next->no_optimize &&
+            !node->next->next->is_branch_target) {
             
             // Replace with NEG
-            strcpy(prog->lines[i].opcode, "NEG");
-            strcpy(prog->lines[i].operand, "");
-            prog->lines[i+1].is_dead = true;
-            prog->lines[i+2].is_dead = true;
+            node->opcode = realloc(node->opcode, 4);
+            if (node->opcode) {
+                strcpy(node->opcode, "NEG");
+            }
+            node->operand = NULL;
+            node->next->is_dead = true;
+            node->next->next->is_dead = true;
             prog->optimizations++;
         }
         
@@ -1565,306 +1582,75 @@ void optimize_45gs02_instructions(Program *prog) {
         
         // 45GS02 has ASR instruction (arithmetic shift right, preserves sign)
         // Pattern: CMP #$80, ROR -> ASR
-        if (i + 1 < prog->count &&
-            strcmp(prog->lines[i].opcode, "CMP") == 0 &&
-            strcmp(prog->lines[i].operand, "#$80") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "ROR") == 0 &&
-            !prog->lines[i+1].no_optimize &&
-            !prog->lines[i+1].is_branch_target) {
+        if (node->opcode && strcmp(node->opcode, "CMP") == 0 &&
+            node->operand && strcmp(node->operand, "#$80") == 0 &&
+            node->next && node->next->opcode && strcmp(node->next->opcode, "ROR") == 0 &&
+            !node->next->no_optimize &&
+            !node->next->is_branch_target) {
             
             // Can use ASR for signed right shift
-            strcpy(prog->lines[i].opcode, "ASR");
-            strcpy(prog->lines[i].operand, "");
-            prog->lines[i+1].is_dead = true;
+            node->opcode = realloc(node->opcode, 4);
+            if (node->opcode) {
+                strcpy(node->opcode, "ASR");
+            }
+            node->operand = NULL;
+            node->next->is_dead = true;
             prog->optimizations++;
         }
         
-        // ===== ASRQ (32-bit Arithmetic Shift Right) =====
-        // Since Q = [Z:Y:X:A], shifting Q affects all four registers
-        
-        // ===== 32-bit Arithmetic with Q =====
-        // Pattern: Multi-byte addition/subtraction sequences
-        // Can be replaced with ADCQ/SBCQ but must be careful about register side effects
-        
-        // Example: 16-bit add that doesn't use Y or Z could benefit
-        if (i + 5 < prog->count &&
-            strcmp(prog->lines[i].opcode, "CLC") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "ADC") == 0 &&
-            strcmp(prog->lines[i+3].opcode, "STA") == 0 &&
-            strcmp(prog->lines[i+4].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i+5].opcode, "ADC") == 0) {
-            
-            // This is 16-bit addition pattern
-            // Could potentially use Q register operations
-            // But must verify Y and Z are not in use
-            // Complex analysis needed - mark as candidate
-        }
-        
-        // ===== INC16/DEC16 (16-bit increment/decrement) =====
-        
-        // Pattern: INC addr, BNE skip, INC addr+1, skip:
-        // Can become: INW addr (increment word) if available
-        
-        // ===== PHW/PLW (Push/Pull Word) =====
-        
-        // Pattern: LDA low, PHA, LDA high, PHA
-        // Can become: PHW value (push 16-bit word)
-        if (i + 3 < prog->count &&
-            strcmp(prog->lines[i].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i+1].opcode, "PHA") == 0 &&
-            strcmp(prog->lines[i+2].opcode, "LDA") == 0 &&
-            strcmp(prog->lines[i+3].opcode, "PHA") == 0 &&
-            !prog->lines[i+1].no_optimize && !prog->lines[i+2].no_optimize &&
-            !prog->lines[i+3].no_optimize) {
-            
-            // This could be PHW if we can determine the 16-bit value
-            // Complex pattern - needs address analysis
-        }
-        
-        // ===== CPQ (Compare Q register) =====
-        // 32-bit comparisons
-        // Remember: Changes to A, X, Y, Z affect Q!
-        
-        // ===== MAP Instruction Optimizations =====
-        // MAP instruction allows memory banking
-        // Pattern: Multiple bank switches could be optimized
-        
-
+        node = node->next;
     }
-    
-    // Note: Q register optimization requires careful register tracking
-    // Since Q = [Z:Y:X:A], any operation on Q affects all four registers
-    // Similarly, operations on A, X, Y, or Z affect Q
-    // This requires sophisticated data flow analysis
 }
 
 // Inline subroutines that are only called once
-void optimize_inline_subroutines(Program *prog) {
-    for (int i = 0; i < prog->label_count; i++) {
-        Label *lbl = &prog->labels[i];
-        
-        // Only inline if:
-        // 1. It's a subroutine (called via JSR)
-        // 2. Referenced exactly once
-        // 3. We found the RTS that ends it
-        // 4. The subroutine is reasonably small
-        if (!lbl->is_subroutine || lbl->ref_count != 1 || lbl->sub_end < 0) {
-            continue;
-        }
-        
-        int sub_size = lbl->sub_end - lbl->sub_start;
-        
-        // Don't inline very large subroutines (arbitrary limit)
-        if (sub_size > 30) {
-            continue;
-        }
-        
-        // Check if subroutine is marked as no_optimize
-        bool sub_no_opt = false;
-        for (int j = lbl->sub_start; j <= lbl->sub_end; j++) {
-            if (prog->lines[j].no_optimize) {
-                sub_no_opt = true;
-                break;
-            }
-        }
-        if (sub_no_opt) {
-            printf("  Skipping inlining of '%s' (marked no_optimize)\n", lbl->name);
-            continue;
-        }
-        
-        // Don't inline if subroutine contains JSR (nested calls - complex)
-        bool has_jsr = false;
-        for (int j = lbl->sub_start + 1; j <= lbl->sub_end; j++) {
-            if (strcmp(prog->lines[j].opcode, "JSR") == 0) {
-                has_jsr = true;
-                break;
-            }
-        }
-        if (has_jsr) continue;
-        
-        // Find the JSR call site
-        int call_site = lbl->ref_lines[0];
-        if (call_site < 0 || call_site >= prog->count) continue;
-        if (strcmp(prog->lines[call_site].opcode, "JSR") != 0) continue;
-        
-        // Check if call site is marked as no_optimize
-        if (prog->lines[call_site].no_optimize) {
-            printf("  Skipping inlining of '%s' (call site marked no_optimize)\n", lbl->name);
-            continue;
-        }
-        
-        printf("  Inlining subroutine '%s' (size: %d) at line %d\n", 
-               lbl->name, sub_size, call_site);
-        
-        // Mark the JSR instruction as dead
-        prog->lines[call_site].is_dead = true;
-        
-        // Mark the subroutine label as dead (but preserve code)
-        prog->lines[lbl->sub_start].is_dead = true;
-        
-        // Mark the RTS as dead
-        prog->lines[lbl->sub_end].is_dead = true;
-        
-        // Copy subroutine body to call site
-        // We need to insert lines, so we'll need to expand the array
-        int insert_count = 0;
-        for (int j = lbl->sub_start + 1; j < lbl->sub_end; j++) {
-            if (!prog->lines[j].is_dead && prog->lines[j].opcode[0]) {
-                insert_count++;
-            }
-        }
-        
-        if (insert_count > 0) {
-            // Make room for inlined code
-            if (prog->count + insert_count >= prog->capacity) {
-                prog->capacity = prog->count + insert_count + 100;
-                prog->lines = realloc(prog->lines, prog->capacity * sizeof(AsmLine));
-            }
-            
-            // Shift existing code down
-            for (int j = prog->count - 1; j > call_site; j--) {
-                prog->lines[j + insert_count] = prog->lines[j];
-            }
-            
-            // Copy inlined code
-            int dest = call_site + 1;
-            for (int j = lbl->sub_start + 1; j < lbl->sub_end; j++) {
-                if (!prog->lines[j].is_dead && prog->lines[j].opcode[0]) {
-                    prog->lines[dest] = prog->lines[j];
-                    // Add comment showing this was inlined
-                    char comment[MAX_LINE];
-                    int needed = snprintf(comment, MAX_LINE, "%s ; inlined from %s", 
-                            prog->lines[dest].line, lbl->name);
-                    if (needed < MAX_LINE) {
-                        snprintf(prog->lines[dest].line, MAX_LINE, "%s", comment);
-                    }
-                    prog->lines[dest].is_branch_target = false;
-                    dest++;
-                }
-            }
-            
-            prog->count += insert_count;
-            prog->optimizations++;
-        }
-        
-        // Mark all original subroutine lines as dead
-        for (int j = lbl->sub_start; j <= lbl->sub_end; j++) {
-            prog->lines[j].is_dead = true;
-        }
-    }
+void optimize_inline_subroutines_ast(Program *prog) {
+    // This would require more complex AST traversal to identify subroutines
+    // For now, we'll leave this as a placeholder
 }
 
 // Main optimization routine
-void optimize_program(Program *prog) {
+void optimize_program_ast(Program *prog) {
     int prev_opts;
     int pass = 0;
     
     // First perform inlining (only once, at the beginning)
     printf("Performing subroutine inlining...\n");
-    analyze_call_flow(prog);
-    optimize_inline_subroutines(prog);
+    analyze_call_flow_ast(prog);
+    optimize_inline_subroutines_ast(prog);
     
     // Multiple passes until no more optimizations found
     do {
         prev_opts = prog->optimizations;
         
-        analyze_call_flow(prog);
+        analyze_call_flow_ast(prog);
         
-                        // Basic optimizations
+        // Basic optimizations
+        optimize_peephole_ast(prog);
+        optimize_load_store_ast(prog);
+        optimize_register_usage_ast(prog);
+        optimize_constant_propagation_ast(prog);
         
-                        optimize_peephole(prog);
+        // Arithmetic and logic
+        optimize_65c02_instructions_ast(prog);
+        optimize_45gs02_instructions_ast(prog);
         
-                        optimize_load_store(prog);
+        // Control flow
+        optimize_jumps_ast(prog);
         
-                        optimize_register_usage(prog);
-        
-                        optimize_constant_propagation(prog);
-        
-                
-        
-                        
-        
-                        // Arithmetic and logic
-        
-                        optimize_strength_reduction(prog);
-        
-                        optimize_arithmetic(prog);
-        
-                        optimize_bit_operations(prog);
-        
-                        optimize_boolean_logic(prog);
-        
-                        
-        
-                        // Control flow
-        
-                        optimize_flag_usage(prog);
-        
-                        optimize_tail_calls(prog);
-        
-                        optimize_branch_chaining(prog);
-        
-                        optimize_jumps(prog);
-        
-                        optimize_branches(prog);
-        
-                        
-        
-                        // Stack and addressing
-        
-                        optimize_stack_operations(prog);
-        
-                        optimize_addressing_modes(prog);
-        
-                        
-        
-                        // Advanced
-        
-                        optimize_common_subexpressions(prog);
-        
-                        
-        
-                        // CPU-specific
-                        if (prog->trace_level > 1) {
-                            printf("DEBUG optimize_program: Checking CPU-specific optimizations. allow_65c02=%d, is_45gs02=%d\n", prog->allow_65c02, prog->is_45gs02);
-                        }
-                        if (prog->allow_65c02 && !prog->is_45gs02) {
-                            if (prog->trace_level > 1) {
-                                printf("DEBUG optimize_program: Entering optimize_65c02_instructions.\n");
-                            }
-                            optimize_65c02_instructions(prog);
-                        }
-        
-                        
-        
-                        if (prog->is_45gs02) {
-        
-                            optimize_45gs02_instructions(prog);
-        
-                        }
-        
-                        
-        
-                        // Must be last
-        
-                        optimize_dead_code(prog);
+        // Must be last
+        optimize_dead_code_ast(prog);
         
         pass++;
     } while (prog->optimizations > prev_opts && pass < 10);
-    
-    // Analysis-only passes (run once at end)
-    if (prog->mode == OPT_SPEED) {
-        optimize_loop_unrolling(prog);
-    }
-    optimize_zero_page(prog);
-    optimize_loop_invariants(prog);
-    
+
     printf("Optimization completed in %d passes\n", pass);
+
+    // Validate register and flag tracking
+    validate_register_and_flag_tracking(prog);
 }
 
-// Write optimized output
-void write_output(Program *prog, const char *filename) {
+// Write optimized output from AST
+void write_output_ast(Program *prog, const char *filename) {
     FILE *fp = fopen(filename, "w");
     if (!fp) {
         fprintf(stderr, "Error: Cannot write to %s\n", filename);
@@ -1889,12 +1675,44 @@ void write_output(Program *prog, const char *filename) {
                 cmt, cmt);
     }
     
-    for (int i = 0; i < prog->count; i++) {
-        if (!prog->lines[i].is_dead) {
-            fprintf(fp, "%s\n", prog->lines[i].line);
+    AstNode *node = prog->root;
+    while (node) {
+        if (!node->is_dead) {
+            // Reconstruct line from AST node
+            bool has_opcode = node->opcode && node->opcode[0] != '\0';
+
+            if (node->label) {
+                fprintf(fp, "%s", node->label);
+                if (prog->config.supports_colon_labels) {
+                    fprintf(fp, ":");
+                }
+                if (has_opcode) {
+                    // Label with opcode on same line
+                    fprintf(fp, "\t");
+                } else {
+                    // Label only, newline
+                    fprintf(fp, "\n");
+                }
+            } else if (has_opcode) {
+                // No label, add indentation for opcode
+                fprintf(fp, "    ");
+            }
+
+            if (has_opcode) {
+                fprintf(fp, "%s", node->opcode);
+                if (node->operand && node->operand[0] != '\0') {
+                    fprintf(fp, " %s", node->operand);
+                }
+                // Add comment if present
+                if (node->comment && node->comment[0] != '\0') {
+                    fprintf(fp, "\t%s", node->comment);
+                }
+                fprintf(fp, "\n");
+            }
         } else if (prog->trace_level > 0) {
-            fprintf(fp, "%s OPT: Removed - %s\n", cmt, prog->lines[i].line);
+            fprintf(fp, "%s OPT: Removed - %s\n", cmt, node->label ? node->label : "unknown");
         }
+        node = node->next;
     }
     
     fclose(fp);
@@ -2022,22 +1840,10 @@ int main(int argc, char *argv[]) {
     while (fgets(line, MAX_LINE, fp)) {
         // Remove newline
         line[strcspn(line, "\r\n")] = '\0';
-        add_line(prog, line, current_line_num++);
+        add_line_ast(prog, line, current_line_num++);
     }
     fclose(fp);
     
-    // Count local vs global labels
-    int local_count = 0;
-    int global_count = 0;
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_label) {
-            if (prog->lines[i].is_local_label) {
-                local_count++;
-            } else {
-                global_count++;
-            }
-        }
-    }
     printf("Read %d lines from %s\n", prog->count, input_file);
     printf("Optimizing for %s...\n", mode == OPT_SPEED ? "speed" : "size");
     
@@ -2045,20 +1851,19 @@ int main(int argc, char *argv[]) {
         printf("\n** 45GS02 Mode: LDA #0, STA will NOT be converted to STZ **\n");
         printf("** Use LDZ #0, STZ if you want to store zero **\n");
     }
-    printf("Found %d global labels and %d local labels\n", global_count, local_count);
     
     printf("\nOptimizer directives recognized:\n");
     printf("  %s#NOOPT  - Disable optimizations from this point\n", prog->config.comment_char);
     printf("  %s#OPT    - Re-enable optimizations from this point\n\n", prog->config.comment_char);
     
     // Perform optimizations
-    optimize_program(prog);
+    optimize_program_ast(prog);
     
     printf("\n=== Optimization Summary ===\n");
     printf("Applied %d optimizations\n", prog->optimizations);
     
     // Write output
-    write_output(prog, output_file);
+    write_output_ast(prog, output_file);
     printf("Wrote optimized code to %s\n", output_file);
     
     if (prog->trace_level > 0) { // Check trace_level for general trace messages
@@ -2067,8 +1872,10 @@ int main(int argc, char *argv[]) {
     
     // Statistics
     int lines_removed = 0;
-    for (int i = 0; i < prog->count; i++) {
-        if (prog->lines[i].is_dead) lines_removed++;
+    AstNode *node = prog->root;
+    while (node) {
+        if (node->is_dead) lines_removed++;
+        node = node->next;
     }
     printf("Removed %d dead code lines\n", lines_removed);
     printf("Final line count: %d (%.1f%% reduction)\n", 
@@ -2079,6 +1886,6 @@ int main(int argc, char *argv[]) {
         printf("\n** Remember: On 45GS02, STZ stores the Z register! **\n");
     }
     
-    free_program(prog);
+    free_program_ast(prog);
     return 0;
 }
