@@ -1,0 +1,44 @@
+# Future Optimizations and Changes
+
+This file outlines potential areas for improvement and future changes to the `opt6502` project.
+
+## High-Level Goals:
+- Improve code readability and maintainability.
+- Enhance optimization passes for better code generation.
+- Expand test coverage to ensure correctness and prevent regressions.
+- Support additional CPU architectures or instruction sets.
+
+## Specific Areas:
+
+### 1. Codebase Refactoring & Readability:
+- Review and refactor `opt6502.c` for clearer function separation and modularity.
+- Add comments to complex logic sections.
+- Ensure consistent coding style across the project.
+
+### 2. Optimization Enhancements:
+- **Peephole Optimizations:**
+    - Identify and implement more peephole optimization patterns.
+    - Improve existing peephole passes (e.g., redundant loads/stores, branch optimizations).
+- **Dead Code Elimination:**
+    - Enhance detection of unreachable code blocks.
+    - Implement more aggressive dead code removal.
+- **Register Allocation:**
+    - Consider implementing a simple register allocator for improved code efficiency.
+- **Instruction Simplification:**
+    - Look for opportunities to replace complex instruction sequences with simpler, more efficient ones.
+
+### 3. Testing Improvements:
+- Add unit tests for individual optimization functions.
+- Expand integration tests to cover more complex code scenarios and edge cases.
+- Automate test execution and reporting.
+
+### 4. Documentation:
+- Improve `README.md` with more detailed explanations of the optimizer's functionality, usage, and supported features.
+- Document internal architecture and design decisions.
+
+### 5. Build System:
+- Review `Makefile` for potential improvements in build process, dependencies, and portability.
+
+### 6. New Features:
+- Support for other 65xx family CPUs (e.g., 65c816).
+- Implement an AST or IR for more sophisticated optimizations.
