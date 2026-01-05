@@ -21,12 +21,31 @@ for testdir in tests/*; do
         outputfile="$testdir/output/$testname.asm"
         expectedfile="$testdir/expected/$testname.asm"
         mkdir -p "$testdir/output"
-        echo "Testing $testname with cpu flag: $cpu"
-        ./opt6502 -speed $cpu "$testfile" "$outputfile"
-        if diff -uw "$expectedfile" "$outputfile"; then
+
+        # Handle CPU-specific tests by filename (for validation tests)
+        test_cpu="$cpu"
+        if [[ "$testname" == *"45gs02"* ]] && [[ -z "$cpu" ]]; then
+            test_cpu="-cpu 45gs02"
+        elif [[ "$testname" == *"65c02"* ]] && [[ -z "$cpu" ]]; then
+            test_cpu="-cpu 65c02"
+        fi
+
+        echo "Testing $testname with cpu flag: $test_cpu"
+        ./opt6502 -speed $test_cpu "$testfile" "$outputfile"
+
+        # Compare files, ignoring trailing whitespace but preserving label syntax (colons)
+        # Create temporary files with trailing whitespace stripped
+        expected_normalized=$(mktemp)
+        output_normalized=$(mktemp)
+        sed 's/[[:space:]]*$//' "$expectedfile" > "$expected_normalized"
+        sed 's/[[:space:]]*$//' "$outputfile" > "$output_normalized"
+
+        if diff -u "$expected_normalized" "$output_normalized"; then
             echo "✓ $testname ($cpufamily) passed"
+            rm -f "$expected_normalized" "$output_normalized"
         else
             echo "✗ $testname ($cpufamily) failed"
+            rm -f "$expected_normalized" "$output_normalized"
             exit 1
         fi
     done
