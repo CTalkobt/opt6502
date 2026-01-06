@@ -2,43 +2,85 @@
 
 This file outlines potential areas for improvement and future changes to the `opt6502` project.
 
+## Recently Completed (2026-01):
+✅ **AST Implementation** - Complete Abstract Syntax Tree for program representation
+✅ **Register & Flag Tracking** - Comprehensive validation system for A/X/Y/Z registers and C/N/Z/V flags
+✅ **Comment Preservation** - Inline comments maintained through optimization
+✅ **Enhanced 65C02 Optimizations** - Improved STZ generation with redundant LDA removal
+✅ **Enhanced 45GS02 Optimizations** - Fixed Z register optimization, handles multiple stores
+✅ **Test Suite** - Comprehensive regression tests with validation test directory
+✅ **Test Infrastructure** - Automated testing with CPU-specific flag detection
+
 ## High-Level Goals:
-- Improve code readability and maintainability.
-- Enhance optimization passes for better code generation.
-- Expand test coverage to ensure correctness and prevent regressions.
-- Support additional CPU architectures or instruction sets.
+- Leverage register/flag tracking for advanced optimizations
+- Further improve optimization passes for better code generation
+- Expand test coverage to ensure correctness and prevent regressions
+- Enhance documentation with new features
 
 ## Specific Areas:
 
-### 1. Codebase Refactoring & Readability:
-- Review and refactor `opt6502.c` for clearer function separation and modularity.
-- Add comments to complex logic sections.
-- Ensure consistent coding style across the project.
-
-### 2. Optimization Enhancements:
+### 1. Optimization Enhancements (Using Register/Flag Tracking):
+- **Dead Flag Write Elimination:**
+    - Detect and remove flag-setting operations when flags are not read before being set again
+    - Example: Remove redundant CLC before ADC when carry is already clear
+- **Redundant Compare Elimination:**
+    - Use register value tracking to eliminate unnecessary comparisons
+    - Remove CMP when register value is known and result is predictable
+- **Flag-Based Constant Propagation:**
+    - Track flag states across basic blocks for better constant propagation
+    - Optimize branches based on known flag states
+- **Zero Detection Optimization:**
+    - When register is known to be zero, optimize stores and comparisons
+    - Convert more patterns to STZ on 65C02/45GS02
+- **Carry Flag Optimization:**
+    - Track carry flag state to eliminate redundant CLC/SEC instructions
+- **Branch Prediction:**
+    - Use flag knowledge to predict branch outcomes
+    - Enable more aggressive dead code elimination after predictable branches
 - **Peephole Optimizations:**
-    - Identify and implement more peephole optimization patterns.
-    - Improve existing peephole passes (e.g., redundant loads/stores, branch optimizations).
+    - Add more patterns leveraging register/flag knowledge
+    - Identify complex instruction sequences that can be simplified
+
+### 2. Additional Optimization Passes:
 - **Dead Code Elimination:**
-    - Enhance detection of unreachable code blocks.
-    - Implement more aggressive dead code removal.
+    - Use register tracking to identify unused computations
+    - Remove code that sets registers that are never read
 - **Register Allocation:**
-    - Consider implementing a simple register allocator for improved code efficiency.
-- **Instruction Simplification:**
-    - Look for opportunities to replace complex instruction sequences with simpler, more efficient ones.
+    - Use register usage analysis for better allocation decisions
+    - Identify opportunities to reuse register values
+- **Instruction Scheduling:**
+    - Reorder independent instructions for better pipelining
+    - Consider CPU-specific instruction timing
 
 ### 3. Testing Improvements:
-- Add unit tests for individual optimization functions.
-- Expand integration tests to cover more complex code scenarios and edge cases.
-- Automate test execution and reporting.
+- Add unit tests for register/flag tracking functions
+- Create tests specifically for new optimization opportunities
+- Add performance benchmarking suite
+- Test edge cases in flag tracking (overflow, carry combinations)
 
 ### 4. Documentation:
-- Improve `README.md` with more detailed explanations of the optimizer's functionality, usage, and supported features.
-- Document internal architecture and design decisions.
+- Update `README.md` with register/flag tracking features
+- Document optimization opportunities enabled by tracking system
+- Add examples showing before/after optimization with explanation
+- Document internal architecture including AST and validation system
+- Create developer guide for adding new optimizations
 
-### 5. Build System:
-- Review `Makefile` for potential improvements in build process, dependencies, and portability.
+### 5. Code Quality:
+- Add more detailed comments to complex optimization logic
+- Consider splitting large optimization functions into smaller helpers
+- Profile and optimize hot paths in the optimizer itself
 
-### 6. New Features:
-- Support for other 65xx family CPUs (e.g., 65c816).
-- Implement an AST or IR for more sophisticated optimizations.
+### 6. Future Features:
+- **Enhanced 65816 Support:**
+    - Full 16-bit mode support
+    - Track 16-bit register states
+    - Optimize 16-bit operations
+- **Profile-Guided Optimization:**
+    - Accept profiling data to guide optimization decisions
+    - Optimize hot code paths differently from cold paths
+- **Link-Time Optimization:**
+    - Cross-function optimization using register/flag tracking
+    - Inline small subroutines with known behavior
+- **Optimization Statistics:**
+    - Detailed reporting of which optimizations were applied and where
+    - Performance estimation (cycle counting)
