@@ -136,4 +136,4 @@ These tests validate the foundation for future optimizations:
 
 ## Related Documentation
 
-See `VALIDATION_SUMMARY.md` in the project root for complete implementation details and instruction coverage tables.
+See [VALIDATION_SUMMARY.md](../../doc/VALIDATION_SUMMARY.md) for complete implementation details and instruction coverage tables.

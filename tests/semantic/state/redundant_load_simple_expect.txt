@@ -1,0 +1,8 @@
+[registers]
+A=0x42
+X=0x42
+Y=0x00
+
+[flags]
+N=0
+Z=0

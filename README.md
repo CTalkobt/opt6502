@@ -617,5 +617,8 @@ Generated with assistance from Claude (Anthropic)
 
 ## See Also
 
-- [6502 Optimization Guide](./6502_optimizations_guide.md)
-- [45GS02 Optimization Guide](./45gs02_optimization_guide.md)
+- [6502 Optimization Guide](./doc/6502_optimizations_guide.md)
+- [45GS02 Optimization Guide](./doc/45gs02_optimization_guide.md)
+- [Testing Guide](./doc/TESTING.md)
+- [Testing Framework Summary](./doc/TESTING_FRAMEWORK_SUMMARY.md)
+- [Validation Summary](./doc/VALIDATION_SUMMARY.md)

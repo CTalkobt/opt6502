@@ -244,3 +244,9 @@ depend:
 .PHONY: test-diff
 test-diff:
 	@./run_tests.sh
+
+.PHONEY: test-all
+test-all:
+	@./run_all_tests.sh
+
+
