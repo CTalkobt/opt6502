@@ -1,7 +1,14 @@
 #!/bin/bash
+# Regression tests - Golden file comparison
+# For comprehensive testing, use: ./run_all_tests.sh
 set -e
-echo "Running regression tests..."
+echo "Running regression tests (golden file comparison)..."
 for testdir in tests/*; do
+    # Skip if not a directory or if no input/expected subdirectories exist
+    [ -d "$testdir" ] || continue
+    [ -d "$testdir/input" ] || continue
+    [ -d "$testdir/expected" ] || continue
+
     cpufamily=$(basename "$testdir")
     cpu=""
     case "$cpufamily" in
@@ -17,6 +24,8 @@ for testdir in tests/*; do
     esac
 
     for testfile in "$testdir"/input/*.asm; do
+        # Skip if glob didn't match any files
+        [ -f "$testfile" ] || continue
         testname=$(basename "$testfile" .asm)
         outputfile="$testdir/output/$testname.asm"
         expectedfile="$testdir/expected/$testname.asm"
