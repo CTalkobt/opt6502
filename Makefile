@@ -13,7 +13,24 @@ DEBUG_TARGET = opt6502-debug
 PROFILE_TARGET = opt6502-profile
 
 # Source files
-SOURCES = opt6502.c
+SOURCES = src/main.c \
+          src/types.c \
+          src/ast/ast.c \
+          src/ast/parser.c \
+          src/analysis/analysis.c \
+          src/analysis/registers.c \
+          src/optimizations/optimizer.c \
+          src/optimizations/peephole.c \
+          src/optimizations/deadcode.c \
+          src/optimizations/jumps.c \
+          src/optimizations/loadstore.c \
+          src/optimizations/regusage.c \
+          src/optimizations/constant.c \
+          src/optimizations/cpu65c02.c \
+          src/optimizations/cpu45gs02.c \
+          src/optimizations/inline.c \
+          src/output/output.c \
+          src/program/program.c
 OBJECTS = $(SOURCES:.c=.o)
 
 # Installation directory (can be overridden)
@@ -94,6 +111,7 @@ clean:
 	rm -f $(TARGET) $(DEBUG_TARGET) $(PROFILE_TARGET)
 	rm -f $(OBJECTS)
 	rm -f *.o
+	find src -name "*.o" -type f -delete 2>/dev/null || true
 	rm -f gmon.out
 	rm -f test_output.asm
 	@echo "Clean complete."
@@ -137,7 +155,7 @@ test: $(TARGET)
 dist: clean
 	@echo "Creating distribution tarball..."
 	@mkdir -p opt6502-1.0
-	@cp opt6502.c opt6502-1.0/
+	@cp -r src opt6502-1.0/
 	@cp Makefile opt6502-1.0/
 	@if [ -f README.md ]; then cp README.md opt6502-1.0/; fi
 	@if [ -f LICENSE ]; then cp LICENSE opt6502-1.0/; fi
